@@ -11,7 +11,8 @@ CI/CD: Gitea Actions.
 /backend     - Go API сервер
 /frontend    - Svelte приложение
 /deploy      - конфигурации для деплоя
-/.gitea      - CI/CD workflows
+/.gitea      - CI/CD workflows и документация по агентам
+/docs        - документация (Doc-as-code)
 ```
 
 ## Команды

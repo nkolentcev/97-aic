@@ -1,0 +1,7 @@
+# Используйте либо access_token (если уже получен), либо auth_key (для автоматического получения токена)
+gigachat_access_token: "your-access-token-here"
+# gigachat_auth_key: "your-authorization-key-here"  # Base64 encoded Client ID:Client Secret
+port: "8080"
+gigachat_api_url: "https://gigachat.devices.sberbank.ru/api/v1"
+gigachat_auth_url: "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+
