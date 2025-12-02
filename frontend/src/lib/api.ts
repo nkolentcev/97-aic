@@ -8,13 +8,36 @@ export interface ChatResponse {
   error?: string;
 }
 
-export async function* sendMessage(message: string): AsyncGenerator<string, void, unknown> {
+export interface JSONResponseConfig {
+  enabled: boolean;
+  schema_text?: string;  // Текст JSON-структуры из текстового поля
+}
+
+export interface RequestLog {
+  id: number;
+  session_id: string;
+  request_json: string;
+  response_json: string;
+  status_code: number;
+  duration_ms: number;
+  created_at: string;
+}
+
+export async function* sendMessage(
+  message: string,
+  jsonConfig?: JSONResponseConfig
+): AsyncGenerator<string, void, unknown> {
+  const body: any = { message };
+  if (jsonConfig) {
+    body.response_json = jsonConfig;
+  }
+
   const response = await fetch('/api/chat', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {
@@ -57,5 +80,23 @@ export async function* sendMessage(message: string): AsyncGenerator<string, void
       }
     }
   }
+}
+
+export async function fetchLogs(limit: number = 50): Promise<RequestLog[]> {
+  const response = await fetch(`/api/logs?limit=${limit}`);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  const data = await response.json();
+  return data || [];
+}
+
+export async function fetchHistory(sessionId: string, limit: number = 100): Promise<ChatMessage[]> {
+  const response = await fetch(`/api/history?session_id=${sessionId}&limit=${limit}`);
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  const data = await response.json();
+  return data || [];
 }
 

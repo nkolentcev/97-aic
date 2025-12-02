@@ -3,6 +3,7 @@ package gigachat
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -11,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -18,8 +20,14 @@ import (
 
 // Client представляет клиент для работы с GigaChat API
 type Client struct {
-	AccessToken string
-	APIURL      string
+	httpClient *http.Client
+	apiURL     string
+	authURL    string
+	authKey    string
+
+	mu          sync.RWMutex
+	accessToken string
+	expiresAt   time.Time
 }
 
 // TokenResponse представляет ответ на запрос токена
@@ -29,45 +37,87 @@ type TokenResponse struct {
 	TokenType   string `json:"token_type,omitempty"`
 }
 
+// JSONConfig настройки для JSON-ответа
+type JSONConfig struct {
+	Enabled    bool   `json:"enabled"`
+	SchemaText string `json:"schema_text,omitempty"` // Текст структуры из текстового поля
+}
+
 // NewClient создает новый клиент GigaChat
-func NewClient(accessToken, apiURL string) *Client {
+func NewClient(authKey, apiURL, authURL string) *Client {
 	return &Client{
-		AccessToken: accessToken,
-		APIURL:      apiURL,
+		httpClient: createHTTPClient(),
+		apiURL:     apiURL,
+		authURL:    authURL,
+		authKey:    authKey,
 	}
 }
 
-// GetAccessToken получает Access Token используя Authorization Key
-func GetAccessToken(authKey, authURL string) (string, error) {
+// NewClientWithToken создает клиент с готовым токеном (для тестов)
+func NewClientWithToken(accessToken, apiURL string) *Client {
+	return &Client{
+		httpClient:  createHTTPClient(),
+		apiURL:      apiURL,
+		accessToken: accessToken,
+		expiresAt:   time.Now().Add(30 * time.Minute),
+	}
+}
+
+// getToken возвращает актуальный токен, обновляя при необходимости
+func (c *Client) getToken(ctx context.Context) (string, error) {
+	c.mu.RLock()
+	token := c.accessToken
+	expires := c.expiresAt
+	c.mu.RUnlock()
+
+	// Токен валиден еще минимум 1 минуту
+	if token != "" && time.Now().Add(time.Minute).Before(expires) {
+		return token, nil
+	}
+
+	// Нужно обновить токен
+	return c.refreshToken(ctx)
+}
+
+// refreshToken получает новый токен
+func (c *Client) refreshToken(ctx context.Context) (string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Проверяем еще раз под блокировкой
+	if c.accessToken != "" && time.Now().Add(time.Minute).Before(c.expiresAt) {
+		return c.accessToken, nil
+	}
+
+	if c.authKey == "" {
+		return "", fmt.Errorf("auth_key не задан, невозможно обновить токен")
+	}
+
+	authURL := c.authURL
 	if authURL == "" {
 		authURL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 	}
 
-	// Тело запроса с scope
 	body := strings.NewReader("scope=GIGACHAT_API_PERS")
-	
-	// URL должен быть без /token в конце
-	req, err := http.NewRequest("POST", authURL, body)
+	req, err := http.NewRequestWithContext(ctx, "POST", authURL, body)
 	if err != nil {
 		return "", fmt.Errorf("ошибка создания запроса: %w", err)
 	}
 
-	// Используем Basic auth с Authorization Key (который уже в base64)
-	req.Header.Set("Authorization", "Basic "+authKey)
-	req.Header.Set("RqUID", generateRqUID())
+	req.Header.Set("Authorization", "Basic "+c.authKey)
+	req.Header.Set("RqUID", uuid.New().String())
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("Accept", "application/json")
 
-	client := createHTTPClient()
-	resp, err := client.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("ошибка выполнения запроса: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("ошибка получения токена: %d - %s", resp.StatusCode, string(body))
+		respBody, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("ошибка получения токена: %d - %s", resp.StatusCode, string(respBody))
 	}
 
 	var tokenResp TokenResponse
@@ -79,24 +129,23 @@ func GetAccessToken(authKey, authURL string) (string, error) {
 		return "", fmt.Errorf("токен не получен в ответе")
 	}
 
-	return tokenResp.AccessToken, nil
-}
+	c.accessToken = tokenResp.AccessToken
+	if tokenResp.ExpiresAt > 0 {
+		c.expiresAt = time.UnixMilli(tokenResp.ExpiresAt)
+	} else {
+		c.expiresAt = time.Now().Add(30 * time.Minute)
+	}
 
-// generateRqUID генерирует уникальный идентификатор запроса в формате UUID4
-func generateRqUID() string {
-	return uuid.New().String()
+	return c.accessToken, nil
 }
 
 // createHTTPClient создает HTTP клиент с настройкой TLS
 func createHTTPClient() *http.Client {
-	// Пытаемся загрузить системные сертификаты
 	caCertPool, err := x509.SystemCertPool()
 	if err != nil {
-		// Если не удалось загрузить системные сертификаты, создаем пустой пул
 		caCertPool = x509.NewCertPool()
 	}
 
-	// Пытаемся загрузить сертификат НУЦ Минцифры из стандартных мест
 	certPaths := []string{
 		"/etc/ssl/certs/russian_trusted_root_ca.pem",
 		"/etc/ssl/certs/ca-certificates.crt",
@@ -112,18 +161,19 @@ func createHTTPClient() *http.Client {
 		}
 	}
 
-	// Настройка TLS конфигурации
 	tlsConfig := &tls.Config{
 		RootCAs: caCertPool,
 	}
 
-	// Если переменная окружения установлена, отключаем проверку сертификата (только для тестирования!)
 	if os.Getenv("GIGACHAT_SKIP_TLS_VERIFY") == "true" {
 		tlsConfig.InsecureSkipVerify = true
 	}
 
 	transport := &http.Transport{
-		TLSClientConfig: tlsConfig,
+		TLSClientConfig:     tlsConfig,
+		MaxIdleConns:        10,
+		MaxIdleConnsPerHost: 10,
+		IdleConnTimeout:     90 * time.Second,
 	}
 
 	return &http.Client{
@@ -156,10 +206,10 @@ type ChatResponse struct {
 
 // Choice представляет выбор в ответе
 type Choice struct {
-	Index        int     `json:"index"`
-	Delta        *Delta  `json:"delta,omitempty"`
+	Index        int      `json:"index"`
+	Delta        *Delta   `json:"delta,omitempty"`
 	Message      *Message `json:"message,omitempty"`
-	FinishReason string  `json:"finish_reason"`
+	FinishReason string   `json:"finish_reason"`
 }
 
 // Delta представляет инкрементальное обновление
@@ -168,17 +218,50 @@ type Delta struct {
 	Content string `json:"content"`
 }
 
+// buildJSONSystemPrompt создает system prompt для форсирования JSON-формата
+func buildJSONSystemPrompt(config *JSONConfig) string {
+	prompt := "Ваш ответ должен быть строго в формате JSON.\n"
+
+	if config.SchemaText != "" {
+		prompt += fmt.Sprintf("Структура ответа должна соответствовать следующей схеме:\n%s\n", config.SchemaText)
+	}
+
+	prompt += "\nВАЖНО: Отвечай ТОЛЬКО валидным JSON без дополнительных пояснений, комментариев или markdown-разметки!"
+
+	return prompt
+}
+
 // Chat отправляет сообщение в GigaChat API и возвращает streaming ответ
-func (c *Client) Chat(message string, onChunk func(string) error) error {
+func (c *Client) Chat(ctx context.Context, message string, onChunk func(string) error) error {
+	return c.ChatWithJSON(ctx, message, nil, onChunk)
+}
+
+// ChatWithJSON отправляет сообщение с поддержкой JSON-формата ответа
+func (c *Client) ChatWithJSON(ctx context.Context, message string, jsonConfig *JSONConfig, onChunk func(string) error) error {
+	token, err := c.getToken(ctx)
+	if err != nil {
+		return fmt.Errorf("ошибка получения токена: %w", err)
+	}
+
+	messages := []Message{}
+
+	if jsonConfig != nil && jsonConfig.Enabled {
+		systemPrompt := buildJSONSystemPrompt(jsonConfig)
+		messages = append(messages, Message{
+			Role:    "system",
+			Content: systemPrompt,
+		})
+	}
+
+	messages = append(messages, Message{
+		Role:    "user",
+		Content: message,
+	})
+
 	reqBody := ChatRequest{
-		Model: "GigaChat",
-		Messages: []Message{
-			{
-				Role:    "user",
-				Content: message,
-			},
-		},
-		Stream: true,
+		Model:    "GigaChat",
+		Messages: messages,
+		Stream:   true,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -186,17 +269,15 @@ func (c *Client) Chat(message string, onChunk func(string) error) error {
 		return fmt.Errorf("ошибка маршалинга запроса: %w", err)
 	}
 
-	req, err := http.NewRequest("POST", c.APIURL+"/chat/completions", bytes.NewBuffer(jsonData))
+	req, err := http.NewRequestWithContext(ctx, "POST", c.apiURL+"/chat/completions", bytes.NewBuffer(jsonData))
 	if err != nil {
 		return fmt.Errorf("ошибка создания запроса: %w", err)
 	}
 
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.AccessToken)
+	req.Header.Set("Authorization", "Bearer "+token)
 
-	// Создаем HTTP клиент с настройкой TLS для работы с сертификатом НУЦ Минцифры
-	client := createHTTPClient()
-	resp, err := client.Do(req)
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("ошибка выполнения запроса: %w", err)
 	}
@@ -209,6 +290,12 @@ func (c *Client) Chat(message string, onChunk func(string) error) error {
 
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || !strings.HasPrefix(line, "data: ") {
 			continue
@@ -247,4 +334,3 @@ func (c *Client) Chat(message string, onChunk func(string) error) error {
 
 	return nil
 }
-

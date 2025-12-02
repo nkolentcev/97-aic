@@ -1,6 +1,10 @@
 <script lang="ts">
-  export let role: 'user' | 'assistant';
-  export let content: string;
+  interface Props {
+    role: 'user' | 'assistant';
+    content: string;
+  }
+
+  let { role, content }: Props = $props();
 </script>
 
 <div class="message" class:user={role === 'user'} class:assistant={role === 'assistant'}>

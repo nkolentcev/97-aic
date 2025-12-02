@@ -1,16 +1,18 @@
 <script lang="ts">
-  import { createEventDispatcher } from 'svelte';
+  interface Props {
+    disabled?: boolean;
+    loading?: boolean;
+    onsend?: (message: string) => void;
+  }
 
-  export let disabled = false;
-  export let loading = false;
+  let { disabled = false, loading = false, onsend }: Props = $props();
 
-  const dispatch = createEventDispatcher();
   let input: HTMLTextAreaElement;
-  let message = '';
+  let message = $state('');
 
   function handleSubmit() {
     if (message.trim() && !disabled && !loading) {
-      dispatch('send', message.trim());
+      onsend?.(message.trim());
       message = '';
       if (input) {
         input.focus();
@@ -37,14 +39,14 @@
   <textarea
     bind:this={input}
     bind:value={message}
-    on:keydown={handleKeydown}
-    on:input={adjustHeight}
+    onkeydown={handleKeydown}
+    oninput={adjustHeight}
     placeholder="Введите сообщение..."
     disabled={disabled || loading}
     rows="1"
-  />
+  ></textarea>
   <button
-    on:click={handleSubmit}
+    onclick={handleSubmit}
     disabled={disabled || loading || !message.trim()}
     class="send-button"
   >
