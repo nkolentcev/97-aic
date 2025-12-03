@@ -5,9 +5,10 @@
   import LogsTable from './lib/LogsTable.svelte';
   import ThemeDropdown from './lib/ThemeDropdown.svelte';
   import JSONFormatConfig from './lib/JSONFormatConfig.svelte';
-  import { sendMessage, fetchLogs } from './lib/api';
+  import CollectModeConfig from './lib/CollectModeConfig.svelte';
+  import { sendMessage, sendCollectMessage, fetchLogs } from './lib/api';
   import { theme } from './lib/theme';
-  import type { ChatMessage as ChatMessageType, RequestLog, JSONResponseConfig } from './lib/api';
+  import type { ChatMessage as ChatMessageType, RequestLog, JSONResponseConfig, CollectConfig, CollectResponse } from './lib/api';
 
   let messages: ChatMessageType[] = $state([]);
   let logs: RequestLog[] = $state([]);
@@ -16,6 +17,19 @@
   let currentAssistantMessage: string = $state('');
   let jsonFormatEnabled: boolean = $state(false);
   let jsonSchema: string = $state('');
+  
+  // Режим сбора требований
+  let collectModeEnabled: boolean = $state(false);
+  let collectConfig: CollectConfig = $state({
+    enabled: false,
+    role: '',
+    goal: '',
+    required_questions: [],
+    output_format: ''
+  });
+  let collectSessionId: string | null = $state(null);
+  let collectStatus: string = $state('');
+  let collectResult: string | null = $state(null);
 
   onMount(() => {
     // Инициализируем тему
@@ -31,6 +45,14 @@
     }
   }
 
+  function startNewCollectSession() {
+    collectSessionId = null;
+    collectStatus = '';
+    collectResult = null;
+    messages = [];
+    error = null;
+  }
+
   async function handleSend(userMessage: string) {
     messages = [...messages, { role: 'user', content: userMessage }];
     loading = true;
@@ -38,38 +60,68 @@
     currentAssistantMessage = '';
 
     try {
-      // Формируем конфиг JSON-ответа
-      let jsonConfig: JSONResponseConfig | undefined;
-      if (jsonFormatEnabled && jsonSchema.trim()) {
-        jsonConfig = {
-          enabled: true,
-          schema_text: jsonSchema.trim(),
-        };
-      }
+      // Режим сбора требований
+      if (collectModeEnabled) {
+        const startNew = collectSessionId === null;
+        const response: CollectResponse = await sendCollectMessage(
+          userMessage,
+          collectSessionId || undefined,
+          { ...collectConfig, enabled: true },
+          startNew
+        );
 
-      for await (const chunk of sendMessage(userMessage, jsonConfig)) {
-        currentAssistantMessage += chunk;
-        const lastMessage = messages[messages.length - 1];
-        if (lastMessage && lastMessage.role === 'assistant') {
-          messages[messages.length - 1] = {
-            role: 'assistant',
-            content: currentAssistantMessage,
-          };
-        } else {
-          messages = [...messages, { role: 'assistant', content: currentAssistantMessage }];
+        collectSessionId = response.session_id;
+        collectStatus = response.status;
+
+        let assistantContent = '';
+        if (response.status === 'collecting' && response.question) {
+          assistantContent = response.question;
+        } else if (response.status === 'ready' && response.result) {
+          assistantContent = '✅ **Результат готов!**\n\n' + response.result;
+          collectResult = response.result;
+        } else if (response.status === 'error') {
+          throw new Error(response.error || 'Неизвестная ошибка');
+        } else if (response.status === 'raw') {
+          assistantContent = response.raw_response || response.result || 'Получен ответ';
         }
-        messages = [...messages];
-      }
 
-      if (currentAssistantMessage) {
-        const lastMessage = messages[messages.length - 1];
-        if (lastMessage && lastMessage.role === 'assistant') {
-          messages[messages.length - 1] = {
-            role: 'assistant',
-            content: currentAssistantMessage,
+        if (assistantContent) {
+          messages = [...messages, { role: 'assistant', content: assistantContent }];
+        }
+      } else {
+        // Обычный режим чата
+        let jsonConfig: JSONResponseConfig | undefined;
+        if (jsonFormatEnabled && jsonSchema.trim()) {
+          jsonConfig = {
+            enabled: true,
+            schema_text: jsonSchema.trim(),
           };
-        } else {
-          messages = [...messages, { role: 'assistant', content: currentAssistantMessage }];
+        }
+
+        for await (const chunk of sendMessage(userMessage, jsonConfig)) {
+          currentAssistantMessage += chunk;
+          const lastMessage = messages[messages.length - 1];
+          if (lastMessage && lastMessage.role === 'assistant') {
+            messages[messages.length - 1] = {
+              role: 'assistant',
+              content: currentAssistantMessage,
+            };
+          } else {
+            messages = [...messages, { role: 'assistant', content: currentAssistantMessage }];
+          }
+          messages = [...messages];
+        }
+
+        if (currentAssistantMessage) {
+          const lastMessage = messages[messages.length - 1];
+          if (lastMessage && lastMessage.role === 'assistant') {
+            messages[messages.length - 1] = {
+              role: 'assistant',
+              content: currentAssistantMessage,
+            };
+          } else {
+            messages = [...messages, { role: 'assistant', content: currentAssistantMessage }];
+          }
         }
       }
 
@@ -94,9 +146,50 @@
   <div class="main-content">
     <!-- Левая панель - конфигурация и логи -->
     <div class="logs-panel">
-      <!-- Верхняя часть - конфигурация JSON -->
+      <!-- Верхняя часть - конфигурация -->
       <div class="config-section">
-        <JSONFormatConfig bind:enabled={jsonFormatEnabled} bind:jsonSchema={jsonSchema} />
+        <!-- Переключатель режимов -->
+        <div class="mode-tabs">
+          <button 
+            class="mode-tab" 
+            class:active={!collectModeEnabled}
+            onclick={() => { collectModeEnabled = false; }}
+          >
+            Обычный чат
+          </button>
+          <button 
+            class="mode-tab" 
+            class:active={collectModeEnabled}
+            onclick={() => { collectModeEnabled = true; }}
+          >
+            Сбор требований
+          </button>
+        </div>
+
+        {#if collectModeEnabled}
+          <CollectModeConfig bind:enabled={collectConfig.enabled} bind:config={collectConfig} />
+          
+          {#if collectSessionId}
+            <div class="collect-status">
+              <div class="status-row">
+                <span class="status-label">Сессия:</span>
+                <code class="session-id">{collectSessionId}</code>
+              </div>
+              <div class="status-row">
+                <span class="status-label">Статус:</span>
+                <span class="status-value" class:ready={collectStatus === 'ready'}>
+                  {collectStatus === 'collecting' ? '🔄 Сбор данных...' : 
+                   collectStatus === 'ready' ? '✅ Готово' : collectStatus}
+                </span>
+              </div>
+              <button class="new-session-btn" onclick={startNewCollectSession}>
+                Начать новую сессию
+              </button>
+            </div>
+          {/if}
+        {:else}
+          <JSONFormatConfig bind:enabled={jsonFormatEnabled} bind:jsonSchema={jsonSchema} />
+        {/if}
       </div>
       
       <!-- Нижняя часть - таблица логов -->
@@ -177,7 +270,99 @@
     flex-shrink: 0;
     border-bottom: 1px solid var(--border);
     overflow-y: auto;
-    max-height: 40%;
+    max-height: 50%;
+    padding: 12px;
+  }
+
+  .mode-tabs {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 12px;
+    background-color: var(--muted);
+    padding: 4px;
+    border-radius: 8px;
+  }
+
+  .mode-tab {
+    flex: 1;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    color: var(--muted-foreground);
+    font-size: 13px;
+    font-weight: 500;
+    cursor: pointer;
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+
+  .mode-tab:hover {
+    color: var(--foreground);
+  }
+
+  .mode-tab.active {
+    background-color: var(--background);
+    color: var(--foreground);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+  }
+
+  .collect-status {
+    margin-top: 12px;
+    padding: 12px;
+    background-color: var(--muted);
+    border-radius: 8px;
+  }
+
+  .status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  .status-label {
+    font-size: 12px;
+    color: var(--muted-foreground);
+    min-width: 60px;
+  }
+
+  .session-id {
+    font-size: 11px;
+    background-color: var(--background);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 200px;
+  }
+
+  .status-value {
+    font-size: 13px;
+    color: var(--foreground);
+  }
+
+  .status-value.ready {
+    color: var(--primary);
+    font-weight: 500;
+  }
+
+  .new-session-btn {
+    width: 100%;
+    margin-top: 8px;
+    padding: 8px 12px;
+    background-color: var(--secondary);
+    color: var(--secondary-foreground);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+  }
+
+  .new-session-btn:hover {
+    background-color: var(--accent);
   }
 
   .logs-section {

@@ -21,9 +21,11 @@ type ChatHandler struct {
 
 // ChatRequest представляет входящий запрос
 type ChatRequest struct {
-	Message      string             `json:"message"`
-	SessionID    string             `json:"session_id,omitempty"`
-	ResponseJSON *gigachat.JSONConfig `json:"response_json,omitempty"`
+	Message      string                 `json:"message"`
+	SessionID    string                 `json:"session_id,omitempty"`
+	UseHistory   bool                   `json:"use_history,omitempty"`   // Использовать историю сессии
+	ResponseJSON *gigachat.JSONConfig   `json:"response_json,omitempty"`
+	Options      *gigachat.ChatOptions  `json:"options,omitempty"`       // Расширенные параметры
 }
 
 // NewChatHandler создает новый обработчик чата
@@ -77,11 +79,29 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"message_length", len(req.Message),
 		"session_id", req.SessionID,
 		"has_json_config", req.ResponseJSON != nil,
+		"use_history", req.UseHistory,
 	)
 
 	// Генерируем session_id если не передан
 	if req.SessionID == "" {
 		req.SessionID = fmt.Sprintf("session_%d", time.Now().UnixNano())
+	}
+
+	// Загружаем историю сообщений если нужно
+	var history []gigachat.Message
+	if req.UseHistory && h.Storage != nil {
+		messages, err := h.Storage.GetMessages(req.SessionID, 100)
+		if err != nil {
+			logger.Warn("ошибка загрузки истории", "error", err, "session_id", req.SessionID)
+		} else {
+			for _, msg := range messages {
+				history = append(history, gigachat.Message{
+					Role:    msg.Role,
+					Content: msg.Content,
+				})
+			}
+			logger.Debug("загружена история", "count", len(history), "session_id", req.SessionID)
+		}
 	}
 
 	// Сохраняем сообщение пользователя
@@ -105,8 +125,20 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Собираем полный ответ для сохранения
 	var fullResponse string
 
+	// Подготавливаем опции для запроса
+	opts := req.Options
+	if opts == nil {
+		opts = &gigachat.ChatOptions{}
+	}
+	// Устанавливаем JSONConfig если передан в старом формате
+	if req.ResponseJSON != nil {
+		opts.JSONConfig = req.ResponseJSON
+	}
+	// Добавляем историю
+	opts.History = history
+
 	// Отправка сообщений через streaming
-	err = h.GigaChatClient.ChatWithJSON(ctx, req.Message, req.ResponseJSON, func(chunk string) error {
+	err = h.GigaChatClient.ChatWithOptions(ctx, req.Message, opts, func(chunk string) error {
 		fullResponse += chunk
 
 		data := map[string]string{"content": chunk}

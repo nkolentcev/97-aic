@@ -59,6 +59,7 @@ func main() {
 
 	// Настройка handlers
 	chatHandler := api.NewChatHandler(gigachatClient, store)
+	collectHandler := api.NewCollectHandler(gigachatClient, store)
 	historyHandler := api.NewHistoryHandler(store, cfg)
 	logsHandler := api.NewLogsHandler(store, cfg)
 	healthHandler := api.NewHealthHandler(store)
@@ -74,6 +75,7 @@ func main() {
 	// Маршрутизатор
 	mux := http.NewServeMux()
 	mux.Handle("/api/chat", chatHandler)
+	mux.Handle("/api/chat/collect", collectHandler)
 	mux.Handle("/api/history", historyHandler)
 	mux.Handle("/api/logs", logsHandler)
 	mux.Handle("/health", healthHandler)

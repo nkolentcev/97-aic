@@ -43,6 +43,25 @@ type JSONConfig struct {
 	SchemaText string `json:"schema_text,omitempty"` // Текст структуры из текстового поля
 }
 
+// CollectConfig настройки для режима сбора требований
+type CollectConfig struct {
+	Enabled           bool     `json:"enabled"`
+	Role              string   `json:"role,omitempty"`               // Роль модели (например, "технический аналитик")
+	Goal              string   `json:"goal,omitempty"`               // Цель сбора (например, "ТЗ на мобильное приложение")
+	RequiredQuestions []string `json:"required_questions,omitempty"` // Список обязательных вопросов
+	OutputFormat      string   `json:"output_format,omitempty"`      // Формат финального результата
+}
+
+// ChatOptions расширенные параметры запроса к API
+type ChatOptions struct {
+	SystemPrompt  string         `json:"system_prompt,omitempty"`
+	History       []Message      `json:"history,omitempty"`
+	JSONConfig    *JSONConfig    `json:"json_config,omitempty"`
+	CollectConfig *CollectConfig `json:"collect_config,omitempty"`
+	MaxTokens     int            `json:"max_tokens,omitempty"`
+	Temperature   float64        `json:"temperature,omitempty"`
+}
+
 // NewClient создает новый клиент GigaChat
 func NewClient(authKey, apiURL, authURL string) *Client {
 	return &Client{
@@ -184,9 +203,11 @@ func createHTTPClient() *http.Client {
 
 // ChatRequest представляет запрос к API
 type ChatRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Stream   bool      `json:"stream"`
+	Model       string    `json:"model"`
+	Messages    []Message `json:"messages"`
+	Stream      bool      `json:"stream"`
+	MaxTokens   int       `json:"max_tokens,omitempty"`
+	Temperature float64   `json:"temperature,omitempty"`
 }
 
 // Message представляет сообщение в чате
@@ -231,6 +252,59 @@ func buildJSONSystemPrompt(config *JSONConfig) string {
 	return prompt
 }
 
+// buildCollectSystemPrompt создает system prompt для режима сбора требований
+func buildCollectSystemPrompt(config *CollectConfig) string {
+	var sb strings.Builder
+
+	// Роль модели
+	role := config.Role
+	if role == "" {
+		role = "профессиональный аналитик"
+	}
+	sb.WriteString(fmt.Sprintf("Ты — %s.\n\n", role))
+
+	// Цель сбора
+	goal := config.Goal
+	if goal == "" {
+		goal = "техническое задание"
+	}
+	sb.WriteString(fmt.Sprintf("Твоя задача — через диалог с пользователем собрать всю необходимую информацию для составления: %s.\n\n", goal))
+
+	// Инструкции по работе
+	sb.WriteString("ПРАВИЛА РАБОТЫ:\n")
+	sb.WriteString("1. Задавай вопросы ПО ОДНОМУ, жди ответа пользователя перед следующим вопросом.\n")
+	sb.WriteString("2. Уточняй детали, если ответ пользователя неполный или неясный.\n")
+	sb.WriteString("3. Не переходи к следующему вопросу, пока не получишь достаточно информации по текущему.\n\n")
+
+	// Обязательные вопросы
+	if len(config.RequiredQuestions) > 0 {
+		sb.WriteString("ОБЯЗАТЕЛЬНЫЕ ВОПРОСЫ (задай все по очереди):\n")
+		for i, q := range config.RequiredQuestions {
+			sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, q))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Формат результата
+	sb.WriteString("ФОРМАТ ОТВЕТА:\n")
+	sb.WriteString("Пока собираешь информацию, отвечай в формате JSON:\n")
+	sb.WriteString(`{"status": "collecting", "question": "Твой следующий вопрос", "collected": ["список уже полученных данных"]}`)
+	sb.WriteString("\n\n")
+
+	sb.WriteString("Когда ВСЕ необходимые вопросы заданы и получены ответы, выдай финальный результат:\n")
+
+	outputFormat := config.OutputFormat
+	if outputFormat == "" {
+		outputFormat = "структурированный документ с разделами"
+	}
+	sb.WriteString(fmt.Sprintf(`{"status": "ready", "result": "%s в виде текста"}`, outputFormat))
+	sb.WriteString("\n\n")
+
+	sb.WriteString("ВАЖНО: Отвечай ТОЛЬКО валидным JSON без дополнительных пояснений!")
+
+	return sb.String()
+}
+
 // Chat отправляет сообщение в GigaChat API и возвращает streaming ответ
 func (c *Client) Chat(ctx context.Context, message string, onChunk func(string) error) error {
 	return c.ChatWithJSON(ctx, message, nil, onChunk)
@@ -238,6 +312,23 @@ func (c *Client) Chat(ctx context.Context, message string, onChunk func(string) 
 
 // ChatWithJSON отправляет сообщение с поддержкой JSON-формата ответа
 func (c *Client) ChatWithJSON(ctx context.Context, message string, jsonConfig *JSONConfig, onChunk func(string) error) error {
+	opts := &ChatOptions{
+		JSONConfig: jsonConfig,
+	}
+	return c.ChatWithOptions(ctx, message, opts, onChunk)
+}
+
+// ChatWithHistory отправляет сообщение с историей предыдущих сообщений
+func (c *Client) ChatWithHistory(ctx context.Context, message string, history []Message, opts *ChatOptions, onChunk func(string) error) error {
+	if opts == nil {
+		opts = &ChatOptions{}
+	}
+	opts.History = history
+	return c.ChatWithOptions(ctx, message, opts, onChunk)
+}
+
+// ChatWithOptions отправляет сообщение с расширенными параметрами
+func (c *Client) ChatWithOptions(ctx context.Context, message string, opts *ChatOptions, onChunk func(string) error) error {
 	token, err := c.getToken(ctx)
 	if err != nil {
 		return fmt.Errorf("ошибка получения токена: %w", err)
@@ -245,14 +336,32 @@ func (c *Client) ChatWithJSON(ctx context.Context, message string, jsonConfig *J
 
 	messages := []Message{}
 
-	if jsonConfig != nil && jsonConfig.Enabled {
-		systemPrompt := buildJSONSystemPrompt(jsonConfig)
+	// Добавляем system prompt
+	var systemPrompt string
+	if opts != nil {
+		// Приоритет: CollectConfig > JSONConfig > SystemPrompt
+		if opts.CollectConfig != nil && opts.CollectConfig.Enabled {
+			systemPrompt = buildCollectSystemPrompt(opts.CollectConfig)
+		} else if opts.JSONConfig != nil && opts.JSONConfig.Enabled {
+			systemPrompt = buildJSONSystemPrompt(opts.JSONConfig)
+		} else if opts.SystemPrompt != "" {
+			systemPrompt = opts.SystemPrompt
+		}
+	}
+
+	if systemPrompt != "" {
 		messages = append(messages, Message{
 			Role:    "system",
 			Content: systemPrompt,
 		})
 	}
 
+	// Добавляем историю сообщений
+	if opts != nil && len(opts.History) > 0 {
+		messages = append(messages, opts.History...)
+	}
+
+	// Добавляем текущее сообщение пользователя
 	messages = append(messages, Message{
 		Role:    "user",
 		Content: message,
@@ -262,6 +371,16 @@ func (c *Client) ChatWithJSON(ctx context.Context, message string, jsonConfig *J
 		Model:    "GigaChat",
 		Messages: messages,
 		Stream:   true,
+	}
+
+	// Добавляем опциональные параметры
+	if opts != nil {
+		if opts.MaxTokens > 0 {
+			reqBody.MaxTokens = opts.MaxTokens
+		}
+		if opts.Temperature > 0 {
+			reqBody.Temperature = opts.Temperature
+		}
 	}
 
 	jsonData, err := json.Marshal(reqBody)
@@ -333,4 +452,36 @@ func (c *Client) ChatWithJSON(ctx context.Context, message string, jsonConfig *J
 	}
 
 	return nil
+}
+
+// CollectStatus представляет статус сбора требований
+type CollectStatus struct {
+	Status    string   `json:"status"`              // "collecting" или "ready"
+	Question  string   `json:"question,omitempty"`  // Следующий вопрос (если collecting)
+	Collected []string `json:"collected,omitempty"` // Собранные данные
+	Result    string   `json:"result,omitempty"`    // Финальный результат (если ready)
+}
+
+// ParseCollectResponse парсит JSON-ответ режима сбора требований
+func ParseCollectResponse(response string) (*CollectStatus, error) {
+	// Пытаемся найти JSON в ответе
+	response = strings.TrimSpace(response)
+
+	// Убираем возможные markdown-обертки
+	if strings.HasPrefix(response, "```json") {
+		response = strings.TrimPrefix(response, "```json")
+		response = strings.TrimSuffix(response, "```")
+		response = strings.TrimSpace(response)
+	} else if strings.HasPrefix(response, "```") {
+		response = strings.TrimPrefix(response, "```")
+		response = strings.TrimSuffix(response, "```")
+		response = strings.TrimSpace(response)
+	}
+
+	var status CollectStatus
+	if err := json.Unmarshal([]byte(response), &status); err != nil {
+		return nil, fmt.Errorf("ошибка парсинга JSON: %w", err)
+	}
+
+	return &status, nil
 }

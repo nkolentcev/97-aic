@@ -13,6 +13,35 @@ export interface JSONResponseConfig {
   schema_text?: string;  // Текст JSON-структуры из текстового поля
 }
 
+// Конфигурация режима сбора требований
+export interface CollectConfig {
+  enabled: boolean;
+  role?: string;              // Роль модели (например, "технический аналитик")
+  goal?: string;              // Цель сбора (например, "ТЗ на мобильное приложение")
+  required_questions?: string[]; // Список обязательных вопросов
+  output_format?: string;     // Формат финального результата
+}
+
+// Ответ режима сбора требований
+export interface CollectResponse {
+  session_id: string;
+  status: 'collecting' | 'ready' | 'error' | 'raw';
+  question?: string;          // Следующий вопрос
+  collected?: string[];       // Собранные данные
+  result?: string;            // Финальный результат
+  error?: string;             // Ошибка
+  raw_response?: string;      // Сырой ответ модели
+}
+
+// Расширенные опции чата
+export interface ChatOptions {
+  system_prompt?: string;
+  json_config?: JSONResponseConfig;
+  collect_config?: CollectConfig;
+  max_tokens?: number;
+  temperature?: number;
+}
+
 export interface RequestLog {
   id: number;
   session_id: string;
@@ -23,13 +52,40 @@ export interface RequestLog {
   created_at: string;
 }
 
+export interface SendMessageOptions {
+  jsonConfig?: JSONResponseConfig;
+  sessionId?: string;
+  useHistory?: boolean;
+  options?: ChatOptions;
+}
+
 export async function* sendMessage(
   message: string,
-  jsonConfig?: JSONResponseConfig
+  optionsOrJsonConfig?: JSONResponseConfig | SendMessageOptions
 ): AsyncGenerator<string, void, unknown> {
   const body: any = { message };
-  if (jsonConfig) {
-    body.response_json = jsonConfig;
+  
+  // Поддержка старого API (только JSONResponseConfig) и нового (SendMessageOptions)
+  if (optionsOrJsonConfig) {
+    if ('enabled' in optionsOrJsonConfig) {
+      // Это JSONResponseConfig (старый формат)
+      body.response_json = optionsOrJsonConfig;
+    } else {
+      // Это SendMessageOptions (новый формат)
+      const opts = optionsOrJsonConfig as SendMessageOptions;
+      if (opts.jsonConfig) {
+        body.response_json = opts.jsonConfig;
+      }
+      if (opts.sessionId) {
+        body.session_id = opts.sessionId;
+      }
+      if (opts.useHistory) {
+        body.use_history = opts.useHistory;
+      }
+      if (opts.options) {
+        body.options = opts.options;
+      }
+    }
   }
 
   const response = await fetch('/api/chat', {
@@ -80,6 +136,42 @@ export async function* sendMessage(
       }
     }
   }
+}
+
+// Отправка сообщения в режиме сбора требований
+export async function sendCollectMessage(
+  message: string,
+  sessionId?: string,
+  collectConfig?: CollectConfig,
+  startNewSession: boolean = false
+): Promise<CollectResponse> {
+  const body: any = { 
+    message,
+    start_new_session: startNewSession,
+  };
+  
+  if (sessionId) {
+    body.session_id = sessionId;
+  }
+  
+  if (collectConfig) {
+    body.collect_config = collectConfig;
+  }
+
+  const response = await fetch('/api/chat/collect', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+  }
+
+  return await response.json();
 }
 
 export async function fetchLogs(limit: number = 50): Promise<RequestLog[]> {
