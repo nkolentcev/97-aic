@@ -7,13 +7,32 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// ProviderConfig конфигурация AI-провайдера
+type ProviderConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	APIKey  string `yaml:"api_key,omitempty"`
+	APIURL  string `yaml:"api_url,omitempty"`
+	AuthURL string `yaml:"auth_url,omitempty"`
+	Model   string `yaml:"model,omitempty"`
+}
+
 // Config представляет конфигурацию приложения
 type Config struct {
-	// GigaChat API
+	// Активный провайдер по умолчанию
+	DefaultProvider string `yaml:"default_provider"` // gigachat, groq, ollama
+
+	// GigaChat API (legacy + новый формат)
 	GigaChatAccessToken string `yaml:"gigachat_access_token"`
 	GigaChatAuthKey     string `yaml:"gigachat_auth_key"`
 	GigaChatAPIURL      string `yaml:"gigachat_api_url"`
 	GigaChatAuthURL     string `yaml:"gigachat_auth_url"`
+
+	// Провайдеры (новый формат)
+	Providers struct {
+		GigaChat ProviderConfig `yaml:"gigachat"`
+		Groq     ProviderConfig `yaml:"groq"`
+		Ollama   ProviderConfig `yaml:"ollama"`
+	} `yaml:"providers"`
 
 	// Сервер
 	Port string `yaml:"port"`
@@ -104,10 +123,62 @@ func (c *Config) applyDefaults() {
 
 // validate проверяет конфигурацию
 func (c *Config) validate() error {
-	if c.GigaChatAccessToken == "" && c.GigaChatAuthKey == "" {
-		return fmt.Errorf("необходимо указать либо gigachat_access_token, либо gigachat_auth_key в конфиге")
+	// Проверяем, что хотя бы один провайдер настроен
+	hasProvider := false
+
+	// Legacy GigaChat config
+	if c.GigaChatAccessToken != "" || c.GigaChatAuthKey != "" {
+		hasProvider = true
+	}
+
+	// New providers config
+	if c.Providers.GigaChat.Enabled && c.Providers.GigaChat.APIKey != "" {
+		hasProvider = true
+	}
+	if c.Providers.Groq.Enabled && c.Providers.Groq.APIKey != "" {
+		hasProvider = true
+	}
+	if c.Providers.Ollama.Enabled {
+		hasProvider = true // Ollama не требует API key
+	}
+
+	if !hasProvider {
+		return fmt.Errorf("необходимо настроить хотя бы один AI-провайдер в конфиге")
 	}
 	return nil
+}
+
+// GetDefaultProvider возвращает провайдер по умолчанию
+func (c *Config) GetDefaultProvider() string {
+	if c.DefaultProvider != "" {
+		return c.DefaultProvider
+	}
+	// Автоопределение
+	if c.Providers.Groq.Enabled && c.Providers.Groq.APIKey != "" {
+		return "groq"
+	}
+	if c.Providers.Ollama.Enabled {
+		return "ollama"
+	}
+	if c.GigaChatAccessToken != "" || c.GigaChatAuthKey != "" || c.Providers.GigaChat.Enabled {
+		return "gigachat"
+	}
+	return "gigachat"
+}
+
+// GetEnabledProviders возвращает список включенных провайдеров
+func (c *Config) GetEnabledProviders() []string {
+	providers := []string{}
+	if c.GigaChatAccessToken != "" || c.GigaChatAuthKey != "" || c.Providers.GigaChat.Enabled {
+		providers = append(providers, "gigachat")
+	}
+	if c.Providers.Groq.Enabled && c.Providers.Groq.APIKey != "" {
+		providers = append(providers, "groq")
+	}
+	if c.Providers.Ollama.Enabled {
+		providers = append(providers, "ollama")
+	}
+	return providers
 }
 
 // IsCORSAllowed проверяет, разрешен ли origin

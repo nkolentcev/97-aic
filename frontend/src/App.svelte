@@ -6,9 +6,10 @@
   import ThemeDropdown from './lib/ThemeDropdown.svelte';
   import JSONFormatConfig from './lib/JSONFormatConfig.svelte';
   import CollectModeConfig from './lib/CollectModeConfig.svelte';
-  import { sendMessage, sendCollectMessage, fetchLogs } from './lib/api';
+  import ProviderConfig from './lib/ProviderConfig.svelte';
+  import { sendMessage, sendCollectMessage, fetchLogs, fetchProviders, sendMessageV2 } from './lib/api';
   import { theme } from './lib/theme';
-  import type { ChatMessage as ChatMessageType, RequestLog, JSONResponseConfig, CollectConfig, CollectResponse } from './lib/api';
+  import type { ChatMessage as ChatMessageType, RequestLog, JSONResponseConfig, CollectConfig, CollectResponse, ProviderInfo, ReasoningModeInfo, ReasoningMode } from './lib/api';
 
   let messages: ChatMessageType[] = $state([]);
   let logs: RequestLog[] = $state([]);
@@ -17,7 +18,11 @@
   let currentAssistantMessage: string = $state('');
   let jsonFormatEnabled: boolean = $state(false);
   let jsonSchema: string = $state('');
-  
+
+  // Вкладки левой панели
+  type LeftPanelTab = 'config' | 'logs';
+  let leftPanelTab: LeftPanelTab = $state('config');
+
   // Режим сбора требований
   let collectModeEnabled: boolean = $state(false);
   let collectConfig: CollectConfig = $state({
@@ -31,10 +36,40 @@
   let collectStatus: string = $state('');
   let collectResult: string | null = $state(null);
 
-  onMount(() => {
+  // Провайдеры и настройки (API v2)
+  let providers: ProviderInfo[] = $state([]);
+  let reasoningModes: ReasoningModeInfo[] = $state([
+    { id: 'direct', name: 'Прямой ответ', description: 'Краткий ответ без рассуждений' },
+    { id: 'step_by_step', name: 'Пошаговое решение', description: 'Разбивает задачу на шаги' },
+    { id: 'experts', name: 'Группа экспертов', description: 'Несколько экспертов дают мнения' }
+  ]);
+  let selectedProvider: string = $state('');
+  let selectedModel: string = $state('');
+  let selectedReasoningMode: ReasoningMode = $state('direct');
+  let systemPrompt: string = $state('');
+  let useApiV2: boolean = $state(true); // Использовать новый API
+
+  onMount(async () => {
     // Инициализируем тему
     theme.subscribe(() => {});
     loadLogs();
+
+    // Загружаем провайдеры
+    try {
+      const data = await fetchProviders();
+      providers = data.providers;
+      reasoningModes = data.reasoning_modes;
+      selectedProvider = data.default_provider;
+      // Устанавливаем модель по умолчанию
+      const defaultP = providers.find(p => p.name === selectedProvider);
+      if (defaultP) {
+        selectedModel = defaultP.current_model || defaultP.models[0] || '';
+      }
+      useApiV2 = true;
+    } catch (e) {
+      console.warn('API v2 недоступен, используем legacy API:', e);
+      useApiV2 = false;
+    }
   });
 
   async function loadLogs() {
@@ -88,8 +123,45 @@
         if (assistantContent) {
           messages = [...messages, { role: 'assistant', content: assistantContent }];
         }
+      } else if (useApiV2 && providers.length > 0) {
+        // Новый API v2 с поддержкой провайдеров
+        const request = {
+          message: userMessage,
+          provider: selectedProvider,
+          model: selectedModel,
+          system_prompt: systemPrompt || undefined,
+          reasoning_mode: selectedReasoningMode !== 'direct' ? selectedReasoningMode : undefined,
+          json_format: jsonFormatEnabled && jsonSchema.trim() ? true : undefined,
+          json_schema: jsonFormatEnabled && jsonSchema.trim() ? jsonSchema.trim() : undefined,
+        };
+
+        for await (const chunk of sendMessageV2(request)) {
+          currentAssistantMessage += chunk;
+          const lastMessage = messages[messages.length - 1];
+          if (lastMessage && lastMessage.role === 'assistant') {
+            messages[messages.length - 1] = {
+              role: 'assistant',
+              content: currentAssistantMessage,
+            };
+          } else {
+            messages = [...messages, { role: 'assistant', content: currentAssistantMessage }];
+          }
+          messages = [...messages];
+        }
+
+        if (currentAssistantMessage) {
+          const lastMessage = messages[messages.length - 1];
+          if (lastMessage && lastMessage.role === 'assistant') {
+            messages[messages.length - 1] = {
+              role: 'assistant',
+              content: currentAssistantMessage,
+            };
+          } else {
+            messages = [...messages, { role: 'assistant', content: currentAssistantMessage }];
+          }
+        }
       } else {
-        // Обычный режим чата
+        // Legacy API (обычный режим чата)
         let jsonConfig: JSONResponseConfig | undefined;
         if (jsonFormatEnabled && jsonSchema.trim()) {
           jsonConfig = {
@@ -139,62 +211,102 @@
 
 <div class="app">
   <div class="header">
-    <h1>GigaChat</h1>
+    <h1>AI Chat</h1>
     <ThemeDropdown />
   </div>
 
   <div class="main-content">
-    <!-- Левая панель - конфигурация и логи -->
-    <div class="logs-panel">
-      <!-- Верхняя часть - конфигурация -->
-      <div class="config-section">
-        <!-- Переключатель режимов -->
-        <div class="mode-tabs">
-          <button 
-            class="mode-tab" 
-            class:active={!collectModeEnabled}
-            onclick={() => { collectModeEnabled = false; }}
-          >
-            Обычный чат
-          </button>
-          <button 
-            class="mode-tab" 
-            class:active={collectModeEnabled}
-            onclick={() => { collectModeEnabled = true; }}
-          >
-            Сбор требований
-          </button>
-        </div>
+    <!-- Левая панель -->
+    <div class="left-panel">
+      <!-- Табы панели -->
+      <div class="panel-tabs">
+        <button
+          class="panel-tab"
+          class:active={leftPanelTab === 'config'}
+          onclick={() => leftPanelTab = 'config'}
+        >
+          Настройки
+        </button>
+        <button
+          class="panel-tab"
+          class:active={leftPanelTab === 'logs'}
+          onclick={() => { leftPanelTab = 'logs'; loadLogs(); }}
+        >
+          Логи
+        </button>
+      </div>
 
-        {#if collectModeEnabled}
-          <CollectModeConfig bind:enabled={collectConfig.enabled} bind:config={collectConfig} />
-          
-          {#if collectSessionId}
-            <div class="collect-status">
-              <div class="status-row">
-                <span class="status-label">Сессия:</span>
-                <code class="session-id">{collectSessionId}</code>
-              </div>
-              <div class="status-row">
-                <span class="status-label">Статус:</span>
-                <span class="status-value" class:ready={collectStatus === 'ready'}>
-                  {collectStatus === 'collecting' ? '🔄 Сбор данных...' : 
-                   collectStatus === 'ready' ? '✅ Готово' : collectStatus}
-                </span>
-              </div>
-              <button class="new-session-btn" onclick={startNewCollectSession}>
-                Начать новую сессию
+      <!-- Содержимое вкладок -->
+      <div class="panel-content">
+        {#if leftPanelTab === 'config'}
+          <!-- Вкладка настроек -->
+          <div class="config-section">
+            <!-- Переключатель режимов чата -->
+            <div class="mode-tabs">
+              <button
+                class="mode-tab"
+                class:active={!collectModeEnabled}
+                onclick={() => { collectModeEnabled = false; }}
+              >
+                Обычный чат
+              </button>
+              <button
+                class="mode-tab"
+                class:active={collectModeEnabled}
+                onclick={() => { collectModeEnabled = true; }}
+              >
+                Сбор требований
               </button>
             </div>
-          {/if}
+
+            {#if collectModeEnabled}
+              <CollectModeConfig bind:enabled={collectConfig.enabled} bind:config={collectConfig} />
+
+              {#if collectSessionId}
+                <div class="collect-status">
+                  <div class="status-row">
+                    <span class="status-label">Сессия:</span>
+                    <code class="session-id">{collectSessionId}</code>
+                  </div>
+                  <div class="status-row">
+                    <span class="status-label">Статус:</span>
+                    <span class="status-value" class:ready={collectStatus === 'ready'}>
+                      {collectStatus === 'collecting' ? '🔄 Сбор данных...' :
+                       collectStatus === 'ready' ? '✅ Готово' : collectStatus}
+                    </span>
+                  </div>
+                  <button class="new-session-btn" onclick={startNewCollectSession}>
+                    Начать новую сессию
+                  </button>
+                </div>
+              {/if}
+            {:else}
+              <!-- Конфигурация провайдера (API v2) -->
+              {#if useApiV2 && providers.length > 0}
+                <ProviderConfig
+                  {providers}
+                  {reasoningModes}
+                  {selectedProvider}
+                  {selectedModel}
+                  {selectedReasoningMode}
+                  {systemPrompt}
+                  onProviderChange={(p) => selectedProvider = p}
+                  onModelChange={(m) => selectedModel = m}
+                  onReasoningModeChange={(r) => selectedReasoningMode = r}
+                  onSystemPromptChange={(s) => systemPrompt = s}
+                />
+                <div class="config-divider"></div>
+              {/if}
+
+              <JSONFormatConfig bind:enabled={jsonFormatEnabled} bind:jsonSchema={jsonSchema} />
+            {/if}
+          </div>
         {:else}
-          <JSONFormatConfig bind:enabled={jsonFormatEnabled} bind:jsonSchema={jsonSchema} />
+          <!-- Вкладка логов -->
+          <div class="logs-section">
+            <LogsTable {logs} />
+          </div>
         {/if}
-      </div>
-      
-      <!-- Нижняя часть - таблица логов -->
-      <div class="logs-section">
-        <LogsTable {logs} />
       </div>
     </div>
 
@@ -258,26 +370,60 @@
     overflow: hidden;
   }
 
-  .logs-panel {
-    width: 50%;
+  .left-panel {
+    width: 400px;
     border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .panel-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+
+  .panel-tab {
+    flex: 1;
+    padding: 12px 16px;
+    border: none;
+    background: transparent;
+    color: var(--muted-foreground);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    border-bottom: 2px solid transparent;
+  }
+
+  .panel-tab:hover {
+    color: var(--foreground);
+    background-color: var(--muted);
+  }
+
+  .panel-tab.active {
+    color: var(--foreground);
+    border-bottom-color: var(--primary);
+  }
+
+  .panel-content {
+    flex: 1;
     overflow: hidden;
     display: flex;
     flex-direction: column;
   }
 
   .config-section {
-    flex-shrink: 0;
-    border-bottom: 1px solid var(--border);
+    flex: 1;
     overflow-y: auto;
-    max-height: 50%;
-    padding: 12px;
+    padding: 16px;
   }
 
   .mode-tabs {
     display: flex;
     gap: 4px;
-    margin-bottom: 12px;
+    margin-bottom: 16px;
     background-color: var(--muted);
     padding: 4px;
     border-radius: 8px;
@@ -365,16 +511,21 @@
     background-color: var(--accent);
   }
 
+  .config-divider {
+    height: 1px;
+    background-color: var(--border);
+    margin: 16px 0;
+  }
+
   .logs-section {
     flex: 1;
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    min-height: 0;
   }
 
   .chat-panel {
-    width: 50%;
+    flex: 1;
     display: flex;
     flex-direction: column;
     overflow: hidden;
@@ -417,16 +568,16 @@
       flex-direction: column;
     }
 
-    .logs-panel {
+    .left-panel {
       width: 100%;
-      height: 40%;
+      height: 45%;
       border-right: none;
       border-bottom: 1px solid var(--border);
     }
 
     .chat-panel {
       width: 100%;
-      height: 60%;
+      height: 55%;
     }
   }
 </style>

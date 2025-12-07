@@ -13,6 +13,7 @@ import (
 	"github.com/nnk/97-aic/backend/config"
 	"github.com/nnk/97-aic/backend/gigachat"
 	"github.com/nnk/97-aic/backend/logger"
+	"github.com/nnk/97-aic/backend/provider"
 	"github.com/nnk/97-aic/backend/storage"
 )
 
@@ -47,19 +48,75 @@ func main() {
 	}
 	logger.Info("хранилище инициализировано", "path", cfg.DatabasePath)
 
-	// Создание клиента GigaChat (с автообновлением токена)
+	// Создание клиента GigaChat (с автообновлением токена) - legacy
 	var gigachatClient *gigachat.Client
 	if cfg.GigaChatAccessToken != "" {
 		gigachatClient = gigachat.NewClientWithToken(cfg.GigaChatAccessToken, cfg.GigaChatAPIURL)
 		logger.Info("GigaChat клиент создан с готовым токеном")
-	} else {
+	} else if cfg.GigaChatAuthKey != "" {
 		gigachatClient = gigachat.NewClient(cfg.GigaChatAuthKey, cfg.GigaChatAPIURL, cfg.GigaChatAuthURL)
 		logger.Info("GigaChat клиент создан с автообновлением токена")
 	}
 
-	// Настройка handlers
-	chatHandler := api.NewChatHandler(gigachatClient, store)
-	collectHandler := api.NewCollectHandler(gigachatClient, store)
+	// Создание менеджера провайдеров
+	providerManager := provider.NewManager()
+
+	// Регистрация GigaChat
+	if cfg.GigaChatAccessToken != "" || cfg.GigaChatAuthKey != "" {
+		gcProvider := provider.NewGigaChatProvider(provider.GigaChatConfig{
+			AuthKey:     cfg.GigaChatAuthKey,
+			AccessToken: cfg.GigaChatAccessToken,
+			APIURL:      cfg.GigaChatAPIURL,
+			AuthURL:     cfg.GigaChatAuthURL,
+		})
+		providerManager.Register("gigachat", gcProvider)
+		logger.Info("GigaChat провайдер зарегистрирован")
+	}
+
+	// Регистрация Groq
+	if cfg.Providers.Groq.Enabled && cfg.Providers.Groq.APIKey != "" {
+		groqProvider := provider.NewGroqProvider(provider.GroqConfig{
+			APIKey: cfg.Providers.Groq.APIKey,
+			APIURL: cfg.Providers.Groq.APIURL,
+			Model:  cfg.Providers.Groq.Model,
+		})
+		providerManager.Register("groq", groqProvider)
+		logger.Info("Groq провайдер зарегистрирован", "model", groqProvider.GetModel())
+	}
+
+	// Регистрация Ollama
+	if cfg.Providers.Ollama.Enabled {
+		ollamaProvider := provider.NewOllamaProvider(provider.OllamaConfig{
+			APIURL: cfg.Providers.Ollama.APIURL,
+			Model:  cfg.Providers.Ollama.Model,
+		})
+		providerManager.Register("ollama", ollamaProvider)
+		logger.Info("Ollama провайдер зарегистрирован", "model", ollamaProvider.GetModel())
+	}
+
+	// Устанавливаем провайдер по умолчанию
+	defaultProvider := cfg.GetDefaultProvider()
+	if err := providerManager.SetDefault(defaultProvider); err != nil {
+		logger.Warn("не удалось установить провайдер по умолчанию", "provider", defaultProvider, "error", err)
+		// Пробуем установить первый доступный
+		providers := providerManager.List()
+		if len(providers) > 0 {
+			providerManager.SetDefault(providers[0])
+			logger.Info("установлен провайдер по умолчанию", "provider", providers[0])
+		}
+	} else {
+		logger.Info("провайдер по умолчанию", "provider", defaultProvider)
+	}
+
+	// Настройка handlers (legacy + v2)
+	var chatHandler *api.ChatHandler
+	var collectHandler *api.CollectHandler
+	if gigachatClient != nil {
+		chatHandler = api.NewChatHandler(gigachatClient, store)
+		collectHandler = api.NewCollectHandler(gigachatClient, store)
+	}
+	chatHandlerV2 := api.NewChatHandlerV2(providerManager, store)
+	providersHandler := api.NewProvidersHandler(providerManager)
 	historyHandler := api.NewHistoryHandler(store, cfg)
 	logsHandler := api.NewLogsHandler(store, cfg)
 	healthHandler := api.NewHealthHandler(store)
@@ -74,8 +131,17 @@ func main() {
 
 	// Маршрутизатор
 	mux := http.NewServeMux()
-	mux.Handle("/api/chat", chatHandler)
-	mux.Handle("/api/chat/collect", collectHandler)
+	// Legacy API (для обратной совместимости)
+	if chatHandler != nil {
+		mux.Handle("/api/chat", chatHandler)
+	}
+	if collectHandler != nil {
+		mux.Handle("/api/chat/collect", collectHandler)
+	}
+	// API v2 с поддержкой провайдеров
+	mux.Handle("/api/v2/chat", chatHandlerV2)
+	mux.Handle("/api/v2/providers", providersHandler)
+	// Общие endpoints
 	mux.Handle("/api/history", historyHandler)
 	mux.Handle("/api/logs", logsHandler)
 	mux.Handle("/health", healthHandler)

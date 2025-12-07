@@ -42,6 +42,47 @@ export interface ChatOptions {
   temperature?: number;
 }
 
+// ===== API v2 (новые типы) =====
+
+// Режимы рассуждения (День 4)
+export type ReasoningMode = 'direct' | 'step_by_step' | 'experts';
+
+export interface ReasoningModeInfo {
+  id: ReasoningMode;
+  name: string;
+  description: string;
+}
+
+// Информация о провайдере
+export interface ProviderInfo {
+  name: string;
+  models: string[];
+  current_model: string;
+  is_default: boolean;
+}
+
+// Ответ API /api/v2/providers
+export interface ProvidersResponse {
+  providers: ProviderInfo[];
+  default_provider: string;
+  reasoning_modes: ReasoningModeInfo[];
+}
+
+// Запрос к API v2
+export interface ChatRequestV2 {
+  message: string;
+  session_id?: string;
+  use_history?: boolean;
+  provider?: string;
+  model?: string;
+  system_prompt?: string;
+  reasoning_mode?: ReasoningMode;
+  json_format?: boolean;
+  json_schema?: string;
+  max_tokens?: number;
+  temperature?: number;
+}
+
 export interface RequestLog {
   id: number;
   session_id: string;
@@ -192,3 +233,67 @@ export async function fetchHistory(sessionId: string, limit: number = 100): Prom
   return data || [];
 }
 
+// ===== API v2 функции =====
+
+// Получение списка провайдеров
+export async function fetchProviders(): Promise<ProvidersResponse> {
+  const response = await fetch('/api/v2/providers');
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+  return await response.json();
+}
+
+// Отправка сообщения через API v2 (streaming)
+export async function* sendMessageV2(
+  request: ChatRequestV2
+): AsyncGenerator<string, void, unknown> {
+  const response = await fetch('/api/v2/chat', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    throw new Error(`HTTP error! status: ${response.status}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) {
+    throw new Error('Response body is not readable');
+  }
+
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        const data = line.slice(6).trim();
+        if (data === '[DONE]') {
+          return;
+        }
+
+        try {
+          const parsed: ChatResponse = JSON.parse(data);
+          if (parsed.content) {
+            yield parsed.content;
+          } else if (parsed.error) {
+            throw new Error(parsed.error);
+          }
+        } catch (e) {
+          // Игнорируем ошибки парсинга отдельных чанков
+        }
+      }
+    }
+  }
+}

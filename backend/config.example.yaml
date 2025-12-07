@@ -1,26 +1,72 @@
-# GigaChat API
+# ===== ПРОВАЙДЕР ПО УМОЛЧАНИЮ =====
+# Выберите: gigachat, groq, ollama
+default_provider: "groq"
+
+# ===== GIGACHAT (Сбер) =====
+# Бесплатно для физлиц: https://developers.sber.ru/
 # Используйте либо access_token (если уже получен), либо auth_key (для автоматического получения токена)
 # gigachat_access_token: "your-access-token-here"
 gigachat_auth_key: "your-authorization-key-here"  # Base64 encoded Client ID:Client Secret
 gigachat_api_url: "https://gigachat.devices.sberbank.ru/api/v1"
 gigachat_auth_url: "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 
-# Сервер
+# ===== ПРОВАЙДЕРЫ (новый формат) =====
+providers:
+  # GigaChat (альтернативный формат)
+  gigachat:
+    enabled: false
+    api_key: ""  # То же что и gigachat_auth_key
+    model: "GigaChat"  # GigaChat, GigaChat-Plus, GigaChat-Pro
+
+  # Groq - БЕСПЛАТНЫЙ и БЫСТРЫЙ
+  # Получить ключ: https://console.groq.com/keys
+  # Лимиты: ~6000 запросов/день бесплатно
+  groq:
+    enabled: true
+    api_key: "gsk_your_groq_api_key_here"
+    # api_url: "https://api.groq.com/openai/v1"  # по умолчанию
+    model: "llama-3.3-70b-versatile"  # Рекомендуемая модель
+    # Доступные модели:
+    # - llama-3.3-70b-versatile  (лучшее качество)
+    # - llama-3.1-8b-instant     (быстрая)
+    # - mixtral-8x7b-32768       (длинный контекст)
+    # - gemma2-9b-it             (Google)
+
+  # Ollama - ЛОКАЛЬНЫЕ модели (бесплатно, без лимитов)
+  # Установка: https://ollama.ai/download
+  # Запуск: ollama serve
+  # Скачать модель: ollama pull llama3.2:3b
+  ollama:
+    enabled: true
+    api_url: "http://localhost:11434"  # по умолчанию
+    model: "llama3.2:3b"  # Оптимальная для среднего железа
+    # Рекомендации по моделям:
+    #
+    # Слабое железо (8GB RAM, без GPU):
+    # - qwen2.5:0.5b, qwen2.5:1.5b, llama3.2:1b
+    #
+    # Среднее железо (16GB RAM, GTX 1060-1080):
+    # - llama3.2:3b, qwen2.5:3b, phi3:mini, mistral:7b
+    #
+    # Мощное железо (32GB+ RAM, RTX 3070+):
+    # - llama3.1:8b, qwen2.5:7b, codellama:7b, deepseek-coder:6.7b
+
+# ===== СЕРВЕР =====
 port: "8080"
 
-# Логирование
+# ===== ЛОГИРОВАНИЕ =====
 log_level: "info"    # debug, info, warn, error
 log_format: "text"   # text, json
 
-# Хранилище
+# ===== ХРАНИЛИЩЕ =====
 database_path: "data.db"
 
-# Лимиты
+# ===== ЛИМИТЫ =====
 max_request_body_size: 1048576  # 1 MB в байтах
 max_query_limit: 1000           # максимальный limit для запросов к истории/логам
 default_query_limit: 100        # дефолтный limit
 
-# CORS
+# ===== CORS =====
 # Список разрешенных origins. Используйте ["*"] для разрешения всех (не рекомендуется в production)
 cors_allowed_origins:
   - "http://localhost:5173"
