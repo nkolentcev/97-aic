@@ -129,15 +129,32 @@ type ollamaChatResponse struct {
 func (p *OllamaProvider) Chat(ctx context.Context, message string, opts *ChatOptions, onChunk func(string) error) error {
 	messages := []ollamaMessage{}
 
-	// System prompt
+	// System prompt - объединяем все части
 	var systemPrompt string
 	if opts != nil {
-		if opts.JSONFormat && opts.JSONSchemaText != "" {
-			systemPrompt = BuildJSONPrompt(opts.JSONSchemaText)
-		} else if opts.ReasoningMode != "" {
-			systemPrompt = BuildReasoningPrompt(opts.ReasoningMode, opts.SystemPrompt)
-		} else if opts.SystemPrompt != "" {
+		// Базовый system prompt от пользователя
+		if opts.SystemPrompt != "" {
 			systemPrompt = opts.SystemPrompt
+		}
+
+		// Добавляем режим рассуждения
+		if opts.ReasoningMode != "" && opts.ReasoningMode != "direct" {
+			reasoningPrompt := BuildReasoningPrompt(opts.ReasoningMode, "")
+			if systemPrompt != "" {
+				systemPrompt = systemPrompt + "\n\n" + reasoningPrompt
+			} else {
+				systemPrompt = reasoningPrompt
+			}
+		}
+
+		// Добавляем JSON-инструкцию
+		if opts.JSONFormat && opts.JSONSchemaText != "" {
+			jsonPrompt := BuildJSONPrompt(opts.JSONSchemaText)
+			if systemPrompt != "" {
+				systemPrompt = systemPrompt + "\n\n" + jsonPrompt
+			} else {
+				systemPrompt = jsonPrompt
+			}
 		}
 	}
 
