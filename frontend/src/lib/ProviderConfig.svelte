@@ -8,10 +8,12 @@
     selectedModel: string;
     selectedReasoningMode: ReasoningMode;
     systemPrompt: string;
+    temperature: number;
     onProviderChange: (provider: string) => void;
     onModelChange: (model: string) => void;
     onReasoningModeChange: (mode: ReasoningMode) => void;
     onSystemPromptChange: (prompt: string) => void;
+    onTemperatureChange: (temp: number) => void;
   }
 
   let {
@@ -21,10 +23,12 @@
     selectedModel,
     selectedReasoningMode,
     systemPrompt,
+    temperature,
     onProviderChange,
     onModelChange,
     onReasoningModeChange,
-    onSystemPromptChange
+    onSystemPromptChange,
+    onTemperatureChange
   }: Props = $props();
 
   let showSystemPrompt = $state(false);
@@ -56,6 +60,12 @@
   function handleSystemPromptChange(e: Event) {
     const target = e.target as HTMLTextAreaElement;
     onSystemPromptChange(target.value);
+  }
+
+  function handleTemperatureChange(e: Event) {
+    const target = e.target as HTMLInputElement;
+    const value = parseFloat(target.value);
+    onTemperatureChange(isNaN(value) ? 0.7 : value);
   }
 </script>
 
@@ -107,6 +117,36 @@
       {/if}
     </div>
   {/if}
+
+  <!-- Температура -->
+  <div class="config-row">
+    <label for="temperature-input">Температура:</label>
+    <div class="temperature-control">
+      <input
+        type="range"
+        id="temperature-input"
+        min="0"
+        max="2"
+        step="0.1"
+        value={temperature}
+        oninput={handleTemperatureChange}
+      />
+      <input
+        type="number"
+        class="temperature-value"
+        min="0"
+        max="2"
+        step="0.1"
+        value={temperature}
+        oninput={handleTemperatureChange}
+      />
+    </div>
+    <div class="temperature-hint">
+      Низкая (0-0.3): точные ответы<br>
+      Средняя (0.7): баланс<br>
+      Высокая (1.2+): креативность
+    </div>
+  </div>
 
   <!-- День 5: System Prompt -->
   <div class="config-row">
@@ -234,5 +274,61 @@
     font-size: 11px;
     color: var(--muted-foreground);
     margin-top: 4px;
+  }
+
+  .temperature-control {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  input[type="range"] {
+    flex: 1;
+    height: 6px;
+    border-radius: 3px;
+    background: var(--muted);
+    outline: none;
+    -webkit-appearance: none;
+  }
+
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--primary);
+    cursor: pointer;
+  }
+
+  input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: var(--primary);
+    cursor: pointer;
+    border: none;
+  }
+
+  .temperature-value {
+    width: 60px;
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background-color: var(--background);
+    color: var(--foreground);
+    font-size: 13px;
+  }
+
+  .temperature-value:focus {
+    outline: none;
+    border-color: var(--primary);
+  }
+
+  .temperature-hint {
+    font-size: 11px;
+    color: var(--muted-foreground);
+    margin-top: 4px;
+    line-height: 1.4;
   }
 </style>

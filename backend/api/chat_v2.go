@@ -193,10 +193,17 @@ func (h *ChatHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"reasoning_mode": req.ReasoningMode,
 			"system_prompt":  req.SystemPrompt,
 		})
-		responseJSON, _ := json.Marshal(map[string]interface{}{
+		
+		// Формируем response JSON с учетом ошибок
+		responseData := map[string]interface{}{
 			"content": fullResponse,
 			"status":  statusCode,
-		})
+		}
+		if err != nil {
+			responseData["error"] = err.Error()
+		}
+		
+		responseJSON, _ := json.Marshal(responseData)
 		h.Storage.SaveRequestLog(req.SessionID, string(requestJSON), string(responseJSON), statusCode, durationMs)
 	}
 

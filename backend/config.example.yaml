@@ -9,6 +9,7 @@ default_provider: "groq"
 gigachat_auth_key: "your-authorization-key-here"  # Base64 encoded Client ID:Client Secret
 gigachat_api_url: "https://gigachat.devices.sberbank.ru/api/v1"
 gigachat_auth_url: "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+gigachat_skip_tls_verify: true  # Для тестирования: пропускать проверку TLS (НЕБЕЗОПАСНО! Только для разработки)
 
 # ===== ПРОВАЙДЕРЫ (новый формат) =====
 providers:

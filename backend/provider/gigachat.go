@@ -33,11 +33,12 @@ type GigaChatProvider struct {
 
 // GigaChatConfig конфигурация GigaChat провайдера
 type GigaChatConfig struct {
-	AuthKey     string
-	AccessToken string // Готовый токен (для тестов)
-	APIURL      string
-	AuthURL     string
-	Model       string
+	AuthKey         string
+	AccessToken     string // Готовый токен (для тестов)
+	APIURL          string
+	AuthURL         string
+	Model           string
+	SkipTLSVerify   bool   // Пропускать проверку TLS сертификата (для тестирования)
 }
 
 // GigaChatModels доступные модели GigaChat
@@ -65,7 +66,7 @@ func NewGigaChatProvider(cfg GigaChatConfig) *GigaChatProvider {
 	}
 
 	p := &GigaChatProvider{
-		httpClient: createGigaChatHTTPClient(),
+		httpClient: createGigaChatHTTPClient(cfg.SkipTLSVerify),
 		apiURL:     apiURL,
 		authURL:    authURL,
 		authKey:    cfg.AuthKey,
@@ -274,7 +275,7 @@ func (p *GigaChatProvider) Chat(ctx context.Context, message string, opts *ChatO
 		if opts.MaxTokens > 0 {
 			reqBody.MaxTokens = opts.MaxTokens
 		}
-		if opts.Temperature > 0 {
+		if opts.Temperature >= 0 {
 			reqBody.Temperature = opts.Temperature
 		}
 	}
@@ -354,33 +355,36 @@ func (p *GigaChatProvider) Chat(ctx context.Context, message string, opts *ChatO
 }
 
 // createGigaChatHTTPClient создает HTTP клиент с настройкой TLS для GigaChat
-func createGigaChatHTTPClient() *http.Client {
+func createGigaChatHTTPClient(skipTLSVerify bool) *http.Client {
+	// Проверяем переменную окружения (приоритет) или параметр конфига
+	skipVerify := skipTLSVerify || os.Getenv("GIGACHAT_SKIP_TLS_VERIFY") == "true"
+	
 	caCertPool, err := x509.SystemCertPool()
 	if err != nil {
 		caCertPool = x509.NewCertPool()
 	}
 
-	certPaths := []string{
-		"/etc/ssl/certs/russian_trusted_root_ca.pem",
-		"/etc/ssl/certs/ca-certificates.crt",
-		"/usr/local/share/ca-certificates/russian_trusted_root_ca.crt",
-		os.Getenv("HOME") + "/.local/share/ca-certificates/russian_trusted_root_ca.crt",
-	}
+	// Если не пропускаем проверку, пытаемся загрузить российские сертификаты
+	if !skipVerify {
+		certPaths := []string{
+			"/etc/ssl/certs/russian_trusted_root_ca.pem",
+			"/etc/ssl/certs/ca-certificates.crt",
+			"/usr/local/share/ca-certificates/russian_trusted_root_ca.crt",
+			os.Getenv("HOME") + "/.local/share/ca-certificates/russian_trusted_root_ca.crt",
+		}
 
-	for _, certPath := range certPaths {
-		if certData, err := os.ReadFile(certPath); err == nil {
-			if caCertPool.AppendCertsFromPEM(certData) {
-				break
+		for _, certPath := range certPaths {
+			if certData, err := os.ReadFile(certPath); err == nil {
+				if caCertPool.AppendCertsFromPEM(certData) {
+					break
+				}
 			}
 		}
 	}
 
 	tlsConfig := &tls.Config{
-		RootCAs: caCertPool,
-	}
-
-	if os.Getenv("GIGACHAT_SKIP_TLS_VERIFY") == "true" {
-		tlsConfig.InsecureSkipVerify = true
+		RootCAs:            caCertPool,
+		InsecureSkipVerify: skipVerify,
 	}
 
 	transport := &http.Transport{

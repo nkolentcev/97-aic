@@ -26,6 +26,7 @@ type Config struct {
 	GigaChatAuthKey     string `yaml:"gigachat_auth_key"`
 	GigaChatAPIURL      string `yaml:"gigachat_api_url"`
 	GigaChatAuthURL     string `yaml:"gigachat_auth_url"`
+	GigaChatSkipTLSVerify bool `yaml:"gigachat_skip_tls_verify"` // Для тестирования: пропускать проверку TLS сертификата
 
 	// Провайдеры (новый формат)
 	Providers struct {

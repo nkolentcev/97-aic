@@ -175,7 +175,7 @@ func (p *GroqProvider) Chat(ctx context.Context, message string, opts *ChatOptio
 		if opts.MaxTokens > 0 {
 			reqBody.MaxTokens = opts.MaxTokens
 		}
-		if opts.Temperature > 0 {
+		if opts.Temperature >= 0 {
 			reqBody.Temperature = opts.Temperature
 		}
 	}

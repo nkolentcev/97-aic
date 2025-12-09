@@ -187,12 +187,12 @@ func (p *OllamaProvider) Chat(ctx context.Context, message string, opts *ChatOpt
 		Stream:   true,
 	}
 
-	if opts != nil && (opts.MaxTokens > 0 || opts.Temperature > 0) {
+	if opts != nil && (opts.MaxTokens > 0 || opts.Temperature >= 0) {
 		reqBody.Options = &ollamaOptions{}
 		if opts.MaxTokens > 0 {
 			reqBody.Options.NumPredict = opts.MaxTokens
 		}
-		if opts.Temperature > 0 {
+		if opts.Temperature >= 0 {
 			reqBody.Options.Temperature = opts.Temperature
 		}
 	}

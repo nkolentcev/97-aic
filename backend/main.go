@@ -64,13 +64,18 @@ func main() {
 	// Регистрация GigaChat
 	if cfg.GigaChatAccessToken != "" || cfg.GigaChatAuthKey != "" {
 		gcProvider := provider.NewGigaChatProvider(provider.GigaChatConfig{
-			AuthKey:     cfg.GigaChatAuthKey,
-			AccessToken: cfg.GigaChatAccessToken,
-			APIURL:      cfg.GigaChatAPIURL,
-			AuthURL:     cfg.GigaChatAuthURL,
+			AuthKey:       cfg.GigaChatAuthKey,
+			AccessToken:   cfg.GigaChatAccessToken,
+			APIURL:        cfg.GigaChatAPIURL,
+			AuthURL:       cfg.GigaChatAuthURL,
+			SkipTLSVerify: cfg.GigaChatSkipTLSVerify,
 		})
 		providerManager.Register("gigachat", gcProvider)
-		logger.Info("GigaChat провайдер зарегистрирован")
+		if cfg.GigaChatSkipTLSVerify {
+			logger.Warn("GigaChat провайдер зарегистрирован с отключенной проверкой TLS (только для тестирования!)")
+		} else {
+			logger.Info("GigaChat провайдер зарегистрирован")
+		}
 	}
 
 	// Регистрация Groq

@@ -7,6 +7,7 @@
   import JSONFormatConfig from './lib/JSONFormatConfig.svelte';
   import CollectModeConfig from './lib/CollectModeConfig.svelte';
   import ProviderConfig from './lib/ProviderConfig.svelte';
+  import TemperatureTest from './lib/TemperatureTest.svelte';
   import { sendMessage, sendCollectMessage, fetchLogs, fetchProviders, sendMessageV2 } from './lib/api';
   import { theme } from './lib/theme';
   import type { ChatMessage as ChatMessageType, RequestLog, JSONResponseConfig, CollectConfig, CollectResponse, ProviderInfo, ReasoningModeInfo, ReasoningMode } from './lib/api';
@@ -20,7 +21,7 @@
   let jsonSchema: string = $state('');
 
   // Вкладки левой панели
-  type LeftPanelTab = 'config' | 'logs';
+  type LeftPanelTab = 'config' | 'logs' | 'temperature';
   let leftPanelTab: LeftPanelTab = $state('config');
 
   // Режим сбора требований
@@ -47,6 +48,7 @@
   let selectedModel: string = $state('');
   let selectedReasoningMode: ReasoningMode = $state('direct');
   let systemPrompt: string = $state('');
+  let temperature: number = $state(0.7);
   let useApiV2: boolean = $state(true); // Использовать новый API
 
   onMount(async () => {
@@ -133,6 +135,7 @@
           reasoning_mode: selectedReasoningMode !== 'direct' ? selectedReasoningMode : undefined,
           json_format: jsonFormatEnabled && jsonSchema.trim() ? true : undefined,
           json_schema: jsonFormatEnabled && jsonSchema.trim() ? jsonSchema.trim() : undefined,
+          temperature: temperature >= 0 ? temperature : undefined,
         };
 
         for await (const chunk of sendMessageV2(request)) {
@@ -229,6 +232,13 @@
         </button>
         <button
           class="panel-tab"
+          class:active={leftPanelTab === 'temperature'}
+          onclick={() => leftPanelTab = 'temperature'}
+        >
+          Тест температуры
+        </button>
+        <button
+          class="panel-tab"
           class:active={leftPanelTab === 'logs'}
           onclick={() => { leftPanelTab = 'logs'; loadLogs(); }}
         >
@@ -290,16 +300,27 @@
                   {selectedModel}
                   {selectedReasoningMode}
                   {systemPrompt}
+                  {temperature}
                   onProviderChange={(p) => selectedProvider = p}
                   onModelChange={(m) => selectedModel = m}
                   onReasoningModeChange={(r) => selectedReasoningMode = r}
                   onSystemPromptChange={(s) => systemPrompt = s}
+                  onTemperatureChange={(t) => temperature = t}
                 />
                 <div class="config-divider"></div>
               {/if}
 
               <JSONFormatConfig bind:enabled={jsonFormatEnabled} bind:jsonSchema={jsonSchema} />
             {/if}
+          </div>
+        {:else if leftPanelTab === 'temperature'}
+          <!-- Вкладка теста температуры -->
+          <div class="temperature-section">
+            <TemperatureTest
+              selectedProvider={selectedProvider}
+              selectedModel={selectedModel}
+              systemPrompt={systemPrompt}
+            />
           </div>
         {:else}
           <!-- Вкладка логов -->
@@ -522,6 +543,11 @@
     overflow: hidden;
     display: flex;
     flex-direction: column;
+  }
+
+  .temperature-section {
+    flex: 1;
+    overflow-y: auto;
   }
 
   .chat-panel {
