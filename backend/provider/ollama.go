@@ -59,6 +59,32 @@ func AllOllamaModels() []string {
 	return all
 }
 
+// HuggingFaceModels список моделей HuggingFace для сравнения
+// Модели из начала, середины и конца списка по размеру параметров
+var HuggingFaceModels = []string{
+	// Начало списка - маленькие модели (0.5B - 1.5B)
+	"qwen2.5:0.5b",   // 0.5B параметров
+	"qwen2.5:1.5b",   // 1.5B параметров
+	
+	// Середина списка - средние модели (3B - 7B)
+	"llama3.2:3b",    // 3B параметров
+	"mistral:7b",     // 7B параметров
+	
+	// Конец списка - большие модели (8B+)
+	"llama3.1:8b",    // 8B параметров
+	"qwen2.5:7b",     // 7B параметров (близко к концу для вашей системы)
+}
+
+// GetHuggingFaceModelsForComparison возвращает список моделей для сравнения
+// Формат: "provider:model" для использования в API
+func GetHuggingFaceModelsForComparison() []string {
+	models := make([]string, len(HuggingFaceModels))
+	for i, model := range HuggingFaceModels {
+		models[i] = "ollama:" + model
+	}
+	return models
+}
+
 // NewOllamaProvider создает новый Ollama провайдер
 func NewOllamaProvider(cfg OllamaConfig) *OllamaProvider {
 	apiURL := cfg.APIURL

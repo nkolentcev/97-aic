@@ -149,6 +149,7 @@ go build -o server .
 - [Руководство для разработчиков](docs/DEVELOPMENT.md) - руководство для разработчиков
 - [Настройка TLS](docs/TLS_SETUP.md) - настройка сертификатов для GigaChat API
 - [Соло-разработка с агентами](docs/SOLO_DEVELOPMENT.md) - современный подход к разработке с Claude Code и Cursor
+- [Сравнение моделей](docs/MODELS_COMPARISON.md) - сравнение моделей HuggingFace через Ollama
 
 ## Конфигурация
 

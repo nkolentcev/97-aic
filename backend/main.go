@@ -122,6 +122,7 @@ func main() {
 	}
 	chatHandlerV2 := api.NewChatHandlerV2(providerManager, store)
 	providersHandler := api.NewProvidersHandler(providerManager)
+	modelsCompareHandler := api.NewModelsCompareHandler(providerManager)
 	historyHandler := api.NewHistoryHandler(store, cfg)
 	logsHandler := api.NewLogsHandler(store, cfg)
 	healthHandler := api.NewHealthHandler(store)
@@ -146,6 +147,7 @@ func main() {
 	// API v2 с поддержкой провайдеров
 	mux.Handle("/api/v2/chat", chatHandlerV2)
 	mux.Handle("/api/v2/providers", providersHandler)
+	mux.Handle("/api/v2/models/compare", modelsCompareHandler)
 	// Общие endpoints
 	mux.Handle("/api/history", historyHandler)
 	mux.Handle("/api/logs", logsHandler)
