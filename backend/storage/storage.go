@@ -3,6 +3,7 @@ package storage
 import (
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -30,6 +31,10 @@ type RequestLog struct {
 	ResponseJSON string    `json:"response_json"`
 	StatusCode   int       `json:"status_code"`
 	DurationMs   int64     `json:"duration_ms"`
+	TokensInput  *int      `json:"tokens_input,omitempty"`
+	TokensOutput *int      `json:"tokens_output,omitempty"`
+	TokensTotal  *int      `json:"tokens_total,omitempty"`
+	Cost         *float64  `json:"cost,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 }
 
@@ -93,6 +98,67 @@ func (s *Storage) migrate() error {
 		return fmt.Errorf("ошибка создания таблицы request_logs: %w", err)
 	}
 
+	// Миграция: добавляем новые поля для токенов и стоимости
+	if err := s.migrateTokensFields(); err != nil {
+		return fmt.Errorf("ошибка миграции полей токенов: %w", err)
+	}
+
+	return nil
+}
+
+// migrateTokensFields добавляет поля для токенов и стоимости в существующую таблицу
+func (s *Storage) migrateTokensFields() error {
+	// Проверяем существование колонок и добавляем их, если их нет
+	// SQLite не поддерживает IF NOT EXISTS для ALTER TABLE, поэтому используем проверку через PRAGMA
+	columns := []struct {
+		name string
+		sql  string
+	}{
+		{"tokens_input", "ALTER TABLE request_logs ADD COLUMN tokens_input INTEGER"},
+		{"tokens_output", "ALTER TABLE request_logs ADD COLUMN tokens_output INTEGER"},
+		{"tokens_total", "ALTER TABLE request_logs ADD COLUMN tokens_total INTEGER"},
+		{"cost", "ALTER TABLE request_logs ADD COLUMN cost REAL"},
+	}
+
+	for _, col := range columns {
+		// Проверяем существование колонки
+		rows, err := s.db.Query("PRAGMA table_info(request_logs)")
+		if err != nil {
+			return fmt.Errorf("ошибка проверки структуры таблицы: %w", err)
+		}
+
+		columnExists := false
+		for rows.Next() {
+			var cid int
+			var name string
+			var dataType string
+			var notNull int
+			var defaultValue interface{}
+			var pk int
+
+			if err := rows.Scan(&cid, &name, &dataType, &notNull, &defaultValue, &pk); err != nil {
+				rows.Close()
+				return fmt.Errorf("ошибка сканирования структуры таблицы: %w", err)
+			}
+
+			if name == col.name {
+				columnExists = true
+				break
+			}
+		}
+		rows.Close()
+
+		// Добавляем колонку, если её нет
+		if !columnExists {
+			if _, err := s.db.Exec(col.sql); err != nil {
+				// Игнорируем ошибку, если колонка уже существует (может быть race condition)
+				if !strings.Contains(err.Error(), "duplicate column") {
+					return fmt.Errorf("ошибка добавления колонки %s: %w", col.name, err)
+				}
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -148,10 +214,10 @@ func (s *Storage) GetMessages(sessionID string, limit int) ([]Message, error) {
 }
 
 // SaveRequestLog сохраняет лог запроса
-func (s *Storage) SaveRequestLog(sessionID, requestJSON, responseJSON string, statusCode int, durationMs int64) (*RequestLog, error) {
+func (s *Storage) SaveRequestLog(sessionID, requestJSON, responseJSON string, statusCode int, durationMs int64, tokensInput, tokensOutput, tokensTotal *int, cost *float64) (*RequestLog, error) {
 	result, err := s.db.Exec(
-		"INSERT INTO request_logs (session_id, request_json, response_json, status_code, duration_ms) VALUES (?, ?, ?, ?, ?)",
-		sessionID, requestJSON, responseJSON, statusCode, durationMs,
+		"INSERT INTO request_logs (session_id, request_json, response_json, status_code, duration_ms, tokens_input, tokens_output, tokens_total, cost) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+		sessionID, requestJSON, responseJSON, statusCode, durationMs, tokensInput, tokensOutput, tokensTotal, cost,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("ошибка сохранения лога: %w", err)
@@ -169,6 +235,10 @@ func (s *Storage) SaveRequestLog(sessionID, requestJSON, responseJSON string, st
 		ResponseJSON: responseJSON,
 		StatusCode:   statusCode,
 		DurationMs:   durationMs,
+		TokensInput:  tokensInput,
+		TokensOutput: tokensOutput,
+		TokensTotal:  tokensTotal,
+		Cost:         cost,
 		CreatedAt:    time.Now(),
 	}, nil
 }
@@ -179,7 +249,7 @@ func (s *Storage) GetRequestLogs(sessionID string, limit int) ([]RequestLog, err
 		limit = 100
 	}
 
-	query := "SELECT id, session_id, request_json, response_json, status_code, duration_ms, created_at FROM request_logs"
+	query := "SELECT id, session_id, request_json, response_json, status_code, duration_ms, tokens_input, tokens_output, tokens_total, cost, created_at FROM request_logs"
 	args := []interface{}{}
 
 	if sessionID != "" {
@@ -202,8 +272,12 @@ func (s *Storage) GetRequestLogs(sessionID string, limit int) ([]RequestLog, err
 		var responseJSONNull sql.NullString
 		var statusCodeNull sql.NullInt64
 		var durationMsNull sql.NullInt64
+		var tokensInputNull sql.NullInt64
+		var tokensOutputNull sql.NullInt64
+		var tokensTotalNull sql.NullInt64
+		var costNull sql.NullFloat64
 
-		if err := rows.Scan(&log.ID, &sessionIDNull, &log.RequestJSON, &responseJSONNull, &statusCodeNull, &durationMsNull, &log.CreatedAt); err != nil {
+		if err := rows.Scan(&log.ID, &sessionIDNull, &log.RequestJSON, &responseJSONNull, &statusCodeNull, &durationMsNull, &tokensInputNull, &tokensOutputNull, &tokensTotalNull, &costNull, &log.CreatedAt); err != nil {
 			return nil, fmt.Errorf("ошибка сканирования лога: %w", err)
 		}
 
@@ -218,6 +292,22 @@ func (s *Storage) GetRequestLogs(sessionID string, limit int) ([]RequestLog, err
 		}
 		if durationMsNull.Valid {
 			log.DurationMs = durationMsNull.Int64
+		}
+		if tokensInputNull.Valid {
+			val := int(tokensInputNull.Int64)
+			log.TokensInput = &val
+		}
+		if tokensOutputNull.Valid {
+			val := int(tokensOutputNull.Int64)
+			log.TokensOutput = &val
+		}
+		if tokensTotalNull.Valid {
+			val := int(tokensTotalNull.Int64)
+			log.TokensTotal = &val
+		}
+		if costNull.Valid {
+			val := costNull.Float64
+			log.Cost = &val
 		}
 
 		logs = append(logs, log)

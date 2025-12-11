@@ -29,23 +29,23 @@ type OllamaConfig struct {
 var OllamaModels = map[string][]string{
 	// Для слабых машин (8GB RAM, без GPU)
 	"low": {
-		"qwen2.5:0.5b",      // 0.5B - очень быстрая, минимальные требования
-		"qwen2.5:1.5b",      // 1.5B - хороший баланс
-		"llama3.2:1b",       // 1B - компактная Llama
-		"gemma2:2b",         // 2B - Google Gemma
+		"qwen2.5:0.5b", // 0.5B - очень быстрая, минимальные требования
+		"qwen2.5:1.5b", // 1.5B - хороший баланс
+		"llama3.2:1b",  // 1B - компактная Llama
+		"gemma2:2b",    // 2B - Google Gemma
 	},
 	// Для средних машин (16GB RAM, GTX 1060-1080)
 	"medium": {
-		"llama3.2:3b",       // 3B - рекомендуемая по умолчанию
-		"qwen2.5:3b",        // 3B - хорошее качество
-		"phi3:mini",         // 3.8B - Microsoft Phi-3
-		"mistral:7b",        // 7B - отличное качество
+		"llama3.2:3b", // 3B - рекомендуемая по умолчанию
+		"qwen2.5:3b",  // 3B - хорошее качество
+		"phi3:mini",   // 3.8B - Microsoft Phi-3
+		"mistral:7b",  // 7B - отличное качество
 	},
 	// Для мощных машин (32GB+ RAM, RTX 3070+)
 	"high": {
-		"llama3.1:8b",       // 8B - высокое качество
-		"qwen2.5:7b",        // 7B - отличный для кода
-		"codellama:7b",      // 7B - специализированная для кода
+		"llama3.1:8b",         // 8B - высокое качество
+		"qwen2.5:7b",          // 7B - отличный для кода
+		"codellama:7b",        // 7B - специализированная для кода
 		"deepseek-coder:6.7b", // 6.7B - лучшая для программирования
 	},
 }
@@ -63,16 +63,16 @@ func AllOllamaModels() []string {
 // Модели из начала, середины и конца списка по размеру параметров
 var HuggingFaceModels = []string{
 	// Начало списка - маленькие модели (0.5B - 1.5B)
-	"qwen2.5:0.5b",   // 0.5B параметров
-	"qwen2.5:1.5b",   // 1.5B параметров
-	
+	"qwen2.5:0.5b", // 0.5B параметров
+	"qwen2.5:1.5b", // 1.5B параметров
+
 	// Середина списка - средние модели (3B - 7B)
-	"llama3.2:3b",    // 3B параметров
-	"mistral:7b",     // 7B параметров
-	
+	"llama3.2:3b", // 3B параметров
+	"mistral:7b",  // 7B параметров
+
 	// Конец списка - большие модели (8B+)
-	"llama3.1:8b",    // 8B параметров
-	"qwen2.5:7b",     // 7B параметров (близко к концу для вашей системы)
+	"llama3.1:8b", // 8B параметров
+	"qwen2.5:7b",  // 7B параметров (близко к концу для вашей системы)
 }
 
 // GetHuggingFaceModelsForComparison возвращает список моделей для сравнения
@@ -126,6 +126,27 @@ func (p *OllamaProvider) GetModel() string {
 	return p.model
 }
 
+// GetMaxTokens возвращает максимальный лимит токенов для текущей модели
+func (p *OllamaProvider) GetMaxTokens() int {
+	// Лимиты зависят от модели, используем консервативные значения
+	// Большинство локальных моделей имеют лимит 2048-4096
+	// Для больших моделей может быть больше
+	if strings.Contains(p.model, "8b") || strings.Contains(p.model, "7b") {
+		return 4096
+	}
+	if strings.Contains(p.model, "3b") || strings.Contains(p.model, "2b") {
+		return 2048
+	}
+	// Для очень маленьких моделей
+	return 2048
+}
+
+// CalculateCost вычисляет стоимость запроса в USD
+// Ollama - локальная модель, стоимость = 0
+func (p *OllamaProvider) CalculateCost(inputTokens, outputTokens int) float64 {
+	return 0.0
+}
+
 // ollamaChatRequest запрос к Ollama API
 type ollamaChatRequest struct {
 	Model    string          `json:"model"`
@@ -140,15 +161,15 @@ type ollamaMessage struct {
 }
 
 type ollamaOptions struct {
-	NumPredict  int     `json:"num_predict,omitempty"`  // max_tokens
+	NumPredict  int     `json:"num_predict,omitempty"` // max_tokens
 	Temperature float64 `json:"temperature,omitempty"`
 }
 
 type ollamaChatResponse struct {
-	Model     string        `json:"model"`
-	Message   ollamaMessage `json:"message"`
-	Done      bool          `json:"done"`
-	DoneReason string       `json:"done_reason,omitempty"`
+	Model      string        `json:"model"`
+	Message    ollamaMessage `json:"message"`
+	Done       bool          `json:"done"`
+	DoneReason string        `json:"done_reason,omitempty"`
 }
 
 // Chat отправляет сообщение через Ollama API

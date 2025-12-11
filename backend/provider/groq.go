@@ -29,11 +29,11 @@ type GroqConfig struct {
 
 // Доступные модели Groq (бесплатные)
 var GroqModels = []string{
-	"llama-3.3-70b-versatile",    // Лучшая для большинства задач
-	"llama-3.1-8b-instant",       // Быстрая, легкая
-	"llama-3.2-3b-preview",       // Очень быстрая, минимальная
-	"mixtral-8x7b-32768",         // Хороша для длинного контекста
-	"gemma2-9b-it",               // Google Gemma 2
+	"llama-3.3-70b-versatile", // Лучшая для большинства задач
+	"llama-3.1-8b-instant",    // Быстрая, легкая
+	"llama-3.2-3b-preview",    // Очень быстрая, минимальная
+	"mixtral-8x7b-32768",      // Хороша для длинного контекста
+	"gemma2-9b-it",            // Google Gemma 2
 }
 
 // NewGroqProvider создает новый Groq провайдер
@@ -78,13 +78,39 @@ func (p *GroqProvider) GetModel() string {
 	return p.model
 }
 
+// GetMaxTokens возвращает максимальный лимит токенов для текущей модели
+func (p *GroqProvider) GetMaxTokens() int {
+	// Лимиты для разных моделей Groq
+	switch p.model {
+	case "mixtral-8x7b-32768":
+		return 32768
+	case "llama-3.3-70b-versatile":
+		return 8192
+	case "llama-3.1-8b-instant":
+		return 8192
+	case "llama-3.2-3b-preview":
+		return 8192
+	case "gemma2-9b-it":
+		return 8192
+	default:
+		return 8192 // Стандартный лимит
+	}
+}
+
+// CalculateCost вычисляет стоимость запроса в USD
+// Groq бесплатный, но можно добавить структуру для будущих платных тарифов
+func (p *GroqProvider) CalculateCost(inputTokens, outputTokens int) float64 {
+	// Groq бесплатный на данный момент
+	return 0.0
+}
+
 // groqChatRequest запрос к Groq API
 type groqChatRequest struct {
-	Model       string         `json:"model"`
-	Messages    []groqMessage  `json:"messages"`
-	Stream      bool           `json:"stream"`
-	MaxTokens   int            `json:"max_tokens,omitempty"`
-	Temperature float64        `json:"temperature,omitempty"`
+	Model       string        `json:"model"`
+	Messages    []groqMessage `json:"messages"`
+	Stream      bool          `json:"stream"`
+	MaxTokens   int           `json:"max_tokens,omitempty"`
+	Temperature float64       `json:"temperature,omitempty"`
 }
 
 type groqMessage struct {
@@ -98,10 +124,10 @@ type groqChatResponse struct {
 }
 
 type groqChoice struct {
-	Index        int         `json:"index"`
-	Delta        *groqDelta  `json:"delta,omitempty"`
-	Message      *groqDelta  `json:"message,omitempty"`
-	FinishReason string      `json:"finish_reason"`
+	Index        int        `json:"index"`
+	Delta        *groqDelta `json:"delta,omitempty"`
+	Message      *groqDelta `json:"message,omitempty"`
+	FinishReason string     `json:"finish_reason"`
 }
 
 type groqDelta struct {

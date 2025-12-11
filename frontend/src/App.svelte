@@ -8,6 +8,7 @@
   import CollectModeConfig from './lib/CollectModeConfig.svelte';
   import ProviderConfig from './lib/ProviderConfig.svelte';
   import TemperatureTest from './lib/TemperatureTest.svelte';
+  import TokenTestPage from './lib/TokenTestPage.svelte';
   import { sendMessage, sendCollectMessage, fetchLogs, fetchProviders, sendMessageV2 } from './lib/api';
   import { theme } from './lib/theme';
   import type { ChatMessage as ChatMessageType, RequestLog, JSONResponseConfig, CollectConfig, CollectResponse, ProviderInfo, ReasoningModeInfo, ReasoningMode } from './lib/api';
@@ -23,6 +24,10 @@
   // Вкладки левой панели
   type LeftPanelTab = 'config' | 'logs' | 'temperature';
   let leftPanelTab: LeftPanelTab = $state('config');
+
+  // Навигация между страницами
+  type Page = 'chat' | 'token-test';
+  let currentPage: Page = $state('chat');
 
   // Режим сбора требований
   let collectModeEnabled: boolean = $state(false);
@@ -214,10 +219,31 @@
 
 <div class="app">
   <div class="header">
-    <h1>AI Chat</h1>
+    <div class="header-left">
+      <h1>AI Chat</h1>
+      <nav class="main-nav">
+        <button
+          class="nav-button"
+          class:active={currentPage === 'chat'}
+          onclick={() => currentPage = 'chat'}
+        >
+          Чат
+        </button>
+        <button
+          class="nav-button"
+          class:active={currentPage === 'token-test'}
+          onclick={() => currentPage = 'token-test'}
+        >
+          Тест токенов
+        </button>
+      </nav>
+    </div>
     <ThemeDropdown />
   </div>
 
+  {#if currentPage === 'token-test'}
+    <TokenTestPage />
+  {:else}
   <div class="main-content">
     <!-- Левая панель -->
     <div class="left-panel">
@@ -358,6 +384,7 @@
       <ChatInput onsend={handleSend} {loading} disabled={loading} />
     </div>
   </div>
+  {/if}
 </div>
 
 <style>
@@ -376,6 +403,40 @@
     display: flex;
     justify-content: space-between;
     align-items: center;
+  }
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .main-nav {
+    display: flex;
+    gap: 8px;
+  }
+
+  .nav-button {
+    padding: 6px 16px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background-color: transparent;
+    color: var(--muted-foreground);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .nav-button:hover {
+    background-color: var(--muted);
+    color: var(--foreground);
+  }
+
+  .nav-button.active {
+    background-color: var(--primary);
+    color: var(--primary-foreground);
+    border-color: var(--primary);
   }
 
   .header h1 {

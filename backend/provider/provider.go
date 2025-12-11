@@ -12,13 +12,13 @@ type Message struct {
 
 // ChatOptions расширенные параметры запроса
 type ChatOptions struct {
-	SystemPrompt    string    `json:"system_prompt,omitempty"`
-	History         []Message `json:"history,omitempty"`
-	MaxTokens       int       `json:"max_tokens,omitempty"`
-	Temperature     float64   `json:"temperature,omitempty"`
-	ReasoningMode   string    `json:"reasoning_mode,omitempty"` // direct, step_by_step, experts
-	JSONFormat      bool      `json:"json_format,omitempty"`
-	JSONSchemaText  string    `json:"json_schema_text,omitempty"`
+	SystemPrompt   string    `json:"system_prompt,omitempty"`
+	History        []Message `json:"history,omitempty"`
+	MaxTokens      int       `json:"max_tokens,omitempty"`
+	Temperature    float64   `json:"temperature,omitempty"`
+	ReasoningMode  string    `json:"reasoning_mode,omitempty"` // direct, step_by_step, experts
+	JSONFormat     bool      `json:"json_format,omitempty"`
+	JSONSchemaText string    `json:"json_schema_text,omitempty"`
 }
 
 // Provider интерфейс для AI-провайдеров
@@ -37,11 +37,18 @@ type Provider interface {
 
 	// GetModel возвращает текущую модель
 	GetModel() string
+
+	// GetMaxTokens возвращает максимальный лимит токенов для текущей модели
+	GetMaxTokens() int
+
+	// CalculateCost вычисляет стоимость запроса в USD
+	// Возвращает стоимость на основе количества токенов входа и выхода
+	CalculateCost(inputTokens, outputTokens int) float64
 }
 
 // ReasoningMode режимы рассуждения
 const (
-	ReasoningDirect     = "direct"      // Прямой ответ
+	ReasoningDirect     = "direct"       // Прямой ответ
 	ReasoningStepByStep = "step_by_step" // Пошаговое решение
 	ReasoningExperts    = "experts"      // Группа экспертов
 )

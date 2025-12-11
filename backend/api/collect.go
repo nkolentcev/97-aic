@@ -21,21 +21,21 @@ type CollectHandler struct {
 
 // CollectRequest представляет входящий запрос для режима сбора требований
 type CollectRequest struct {
-	Message           string                  `json:"message"`
-	SessionID         string                  `json:"session_id,omitempty"`
-	CollectConfig     *gigachat.CollectConfig `json:"collect_config,omitempty"`
-	StartNewSession   bool                    `json:"start_new_session,omitempty"` // Начать новую сессию сбора
+	Message         string                  `json:"message"`
+	SessionID       string                  `json:"session_id,omitempty"`
+	CollectConfig   *gigachat.CollectConfig `json:"collect_config,omitempty"`
+	StartNewSession bool                    `json:"start_new_session,omitempty"` // Начать новую сессию сбора
 }
 
 // CollectResponse представляет ответ режима сбора
 type CollectResponse struct {
-	SessionID string                 `json:"session_id"`
-	Status    string                 `json:"status"`              // "collecting", "ready", "error"
-	Question  string                 `json:"question,omitempty"`  // Следующий вопрос
-	Collected []string               `json:"collected,omitempty"` // Собранные данные
-	Result    string                 `json:"result,omitempty"`    // Финальный результат
-	Error     string                 `json:"error,omitempty"`     // Ошибка
-	RawResponse string               `json:"raw_response,omitempty"` // Сырой ответ модели
+	SessionID   string   `json:"session_id"`
+	Status      string   `json:"status"`                 // "collecting", "ready", "error"
+	Question    string   `json:"question,omitempty"`     // Следующий вопрос
+	Collected   []string `json:"collected,omitempty"`    // Собранные данные
+	Result      string   `json:"result,omitempty"`       // Финальный результат
+	Error       string   `json:"error,omitempty"`        // Ошибка
+	RawResponse string   `json:"raw_response,omitempty"` // Сырой ответ модели
 }
 
 // NewCollectHandler создает новый обработчик режима сбора требований
@@ -182,7 +182,7 @@ func (h *CollectHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if h.Storage != nil {
 		requestJSON, _ := json.Marshal(req)
 		responseJSON, _ := json.Marshal(response)
-		if _, err := h.Storage.SaveRequestLog(req.SessionID, string(requestJSON), string(responseJSON), http.StatusOK, durationMs); err != nil {
+		if _, err := h.Storage.SaveRequestLog(req.SessionID, string(requestJSON), string(responseJSON), http.StatusOK, durationMs, nil, nil, nil, nil); err != nil {
 			logger.Error("ошибка сохранения лога запроса", "error", err)
 		}
 	}
@@ -208,4 +208,3 @@ func sendCollectError(w http.ResponseWriter, sessionID, errorMsg string, statusC
 		Error:     errorMsg,
 	})
 }
-

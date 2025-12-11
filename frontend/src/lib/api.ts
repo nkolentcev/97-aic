@@ -90,6 +90,10 @@ export interface RequestLog {
   response_json: string;
   status_code: number;
   duration_ms: number;
+  tokens_input?: number;
+  tokens_output?: number;
+  tokens_total?: number;
+  cost?: number;
   created_at: string;
 }
 
@@ -245,6 +249,46 @@ export async function fetchProviders(): Promise<ProvidersResponse> {
 }
 
 // Отправка сообщения через API v2 (streaming)
+// ===== API для тестирования токенов =====
+
+export type TokenTestType = 'short' | 'long' | 'exceed_limit' | 'all';
+
+export interface TokenTestRequest {
+  provider: string;
+  model?: string;
+  test_type: TokenTestType;
+}
+
+export interface TokenTestResult {
+  test_type: string;
+  message: string;
+  response: string;
+  tokens_input: number;
+  tokens_output: number;
+  tokens_total: number;
+  cost: number;
+  duration_ms: number;
+  success: boolean;
+  error?: string;
+  max_tokens: number;
+}
+
+export interface TokenTestSummary {
+  total_tests: number;
+  success_count: number;
+  error_count: number;
+  total_tokens: number;
+  total_cost: number;
+  avg_duration_ms: number;
+}
+
+export interface TokenTestResponse {
+  provider: string;
+  model: string;
+  results: TokenTestResult[];
+  summary: TokenTestSummary;
+}
+
 export async function* sendMessageV2(
   request: ChatRequestV2
 ): AsyncGenerator<string, void, unknown> {
@@ -296,4 +340,22 @@ export async function* sendMessageV2(
       }
     }
   }
+}
+
+// Тестирование токенов
+export async function testTokens(request: TokenTestRequest): Promise<TokenTestResponse> {
+  const response = await fetch('/api/v2/token-test', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(request),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`HTTP error! status: ${response.status}, body: ${errorText}`);
+  }
+
+  return await response.json();
 }

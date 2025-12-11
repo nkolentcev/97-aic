@@ -21,11 +21,11 @@ type ChatHandler struct {
 
 // ChatRequest представляет входящий запрос
 type ChatRequest struct {
-	Message      string                 `json:"message"`
-	SessionID    string                 `json:"session_id,omitempty"`
-	UseHistory   bool                   `json:"use_history,omitempty"`   // Использовать историю сессии
-	ResponseJSON *gigachat.JSONConfig   `json:"response_json,omitempty"`
-	Options      *gigachat.ChatOptions  `json:"options,omitempty"`       // Расширенные параметры
+	Message      string                `json:"message"`
+	SessionID    string                `json:"session_id,omitempty"`
+	UseHistory   bool                  `json:"use_history,omitempty"` // Использовать историю сессии
+	ResponseJSON *gigachat.JSONConfig  `json:"response_json,omitempty"`
+	Options      *gigachat.ChatOptions `json:"options,omitempty"` // Расширенные параметры
 }
 
 // NewChatHandler создает новый обработчик чата
@@ -188,7 +188,7 @@ func (h *ChatHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"content": fullResponse,
 			"status":  statusCode,
 		})
-		if _, err := h.Storage.SaveRequestLog(req.SessionID, string(requestJSON), string(responseJSON), statusCode, durationMs); err != nil {
+		if _, err := h.Storage.SaveRequestLog(req.SessionID, string(requestJSON), string(responseJSON), statusCode, durationMs, nil, nil, nil, nil); err != nil {
 			logger.Error("ошибка сохранения лога запроса", "error", err)
 		}
 	}

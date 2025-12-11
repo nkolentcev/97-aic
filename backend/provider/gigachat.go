@@ -33,19 +33,19 @@ type GigaChatProvider struct {
 
 // GigaChatConfig конфигурация GigaChat провайдера
 type GigaChatConfig struct {
-	AuthKey         string
-	AccessToken     string // Готовый токен (для тестов)
-	APIURL          string
-	AuthURL         string
-	Model           string
-	SkipTLSVerify   bool   // Пропускать проверку TLS сертификата (для тестирования)
+	AuthKey       string
+	AccessToken   string // Готовый токен (для тестов)
+	APIURL        string
+	AuthURL       string
+	Model         string
+	SkipTLSVerify bool // Пропускать проверку TLS сертификата (для тестирования)
 }
 
 // GigaChatModels доступные модели GigaChat
 var GigaChatModels = []string{
-	"GigaChat",       // Стандартная модель
-	"GigaChat-Plus",  // Улучшенная модель
-	"GigaChat-Pro",   // Профессиональная модель
+	"GigaChat",      // Стандартная модель
+	"GigaChat-Plus", // Улучшенная модель
+	"GigaChat-Pro",  // Профессиональная модель
 }
 
 // NewGigaChatProvider создает новый GigaChat провайдер
@@ -100,6 +100,35 @@ func (p *GigaChatProvider) SetModel(model string) {
 // GetModel возвращает текущую модель
 func (p *GigaChatProvider) GetModel() string {
 	return p.model
+}
+
+// GetMaxTokens возвращает максимальный лимит токенов для текущей модели
+func (p *GigaChatProvider) GetMaxTokens() int {
+	// Лимиты для разных моделей GigaChat
+	switch p.model {
+	case "GigaChat-Pro":
+		return 32768 // Большой контекст
+	case "GigaChat-Plus":
+		return 8192
+	case "GigaChat":
+		fallthrough
+	default:
+		return 4096 // Стандартный лимит
+	}
+}
+
+// CalculateCost вычисляет стоимость запроса в USD
+// GigaChat имеет разные тарифы, здесь используется приблизительная стоимость
+func (p *GigaChatProvider) CalculateCost(inputTokens, outputTokens int) float64 {
+	// Приблизительные цены для GigaChat (нужно обновить актуальными тарифами)
+	// Используем средние значения
+	inputPricePer1k := 0.001  // $0.001 за 1000 входных токенов
+	outputPricePer1k := 0.002 // $0.002 за 1000 выходных токенов
+
+	inputCost := float64(inputTokens) / 1000.0 * inputPricePer1k
+	outputCost := float64(outputTokens) / 1000.0 * outputPricePer1k
+
+	return inputCost + outputCost
 }
 
 // getToken возвращает актуальный токен
@@ -193,10 +222,10 @@ type gigachatChatResponse struct {
 }
 
 type gigachatChoice struct {
-	Index        int             `json:"index"`
-	Delta        *gigachatDelta  `json:"delta,omitempty"`
-	Message      *gigachatDelta  `json:"message,omitempty"`
-	FinishReason string          `json:"finish_reason"`
+	Index        int            `json:"index"`
+	Delta        *gigachatDelta `json:"delta,omitempty"`
+	Message      *gigachatDelta `json:"message,omitempty"`
+	FinishReason string         `json:"finish_reason"`
 }
 
 type gigachatDelta struct {
@@ -358,7 +387,7 @@ func (p *GigaChatProvider) Chat(ctx context.Context, message string, opts *ChatO
 func createGigaChatHTTPClient(skipTLSVerify bool) *http.Client {
 	// Проверяем переменную окружения (приоритет) или параметр конфига
 	skipVerify := skipTLSVerify || os.Getenv("GIGACHAT_SKIP_TLS_VERIFY") == "true"
-	
+
 	caCertPool, err := x509.SystemCertPool()
 	if err != nil {
 		caCertPool = x509.NewCertPool()

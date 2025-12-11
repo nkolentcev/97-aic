@@ -21,27 +21,27 @@ type ChatHandlerV2 struct {
 
 // ChatRequestV2 запрос к API v2
 type ChatRequestV2 struct {
-	Message       string `json:"message"`
-	SessionID     string `json:"session_id,omitempty"`
-	UseHistory    bool   `json:"use_history,omitempty"`
+	Message    string `json:"message"`
+	SessionID  string `json:"session_id,omitempty"`
+	UseHistory bool   `json:"use_history,omitempty"`
 
 	// Провайдер и модель
-	Provider      string `json:"provider,omitempty"`      // gigachat, groq, ollama
-	Model         string `json:"model,omitempty"`         // конкретная модель
+	Provider string `json:"provider,omitempty"` // gigachat, groq, ollama
+	Model    string `json:"model,omitempty"`    // конкретная модель
 
 	// System Prompt (День 5)
-	SystemPrompt  string `json:"system_prompt,omitempty"`
+	SystemPrompt string `json:"system_prompt,omitempty"`
 
 	// Режим рассуждения (День 4)
 	ReasoningMode string `json:"reasoning_mode,omitempty"` // direct, step_by_step, experts
 
 	// JSON формат
-	JSONFormat    bool   `json:"json_format,omitempty"`
-	JSONSchema    string `json:"json_schema,omitempty"`
+	JSONFormat bool   `json:"json_format,omitempty"`
+	JSONSchema string `json:"json_schema,omitempty"`
 
 	// Параметры генерации
-	MaxTokens     int     `json:"max_tokens,omitempty"`
-	Temperature   float64 `json:"temperature,omitempty"`
+	MaxTokens   int     `json:"max_tokens,omitempty"`
+	Temperature float64 `json:"temperature,omitempty"`
 }
 
 // NewChatHandlerV2 создает новый обработчик
@@ -155,6 +155,9 @@ func (h *ChatHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		JSONSchemaText: req.JSONSchema,
 	}
 
+	// Подсчитываем токены запроса перед отправкой
+	tokensInput := provider.CountTokensForMessages(req.SystemPrompt, history, req.Message)
+
 	// Отправляем запрос
 	err = p.Chat(ctx, req.Message, opts, func(chunk string) error {
 		fullResponse += chunk
@@ -168,6 +171,13 @@ func (h *ChatHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	durationMs := time.Since(startTime).Milliseconds()
 	statusCode := http.StatusOK
+
+	// Подсчитываем токены ответа (приблизительно)
+	tokensOutput := provider.CountTokens(fullResponse)
+	tokensTotal := tokensInput + tokensOutput
+
+	// Вычисляем стоимость
+	cost := p.CalculateCost(tokensInput, tokensOutput)
 
 	if err != nil {
 		logger.Error("ошибка при обработке запроса", "error", err, "duration_ms", durationMs)
@@ -192,19 +202,36 @@ func (h *ChatHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"model":          p.GetModel(),
 			"reasoning_mode": req.ReasoningMode,
 			"system_prompt":  req.SystemPrompt,
+			"tokens_input":   tokensInput,
 		})
-		
+
 		// Формируем response JSON с учетом ошибок
 		responseData := map[string]interface{}{
-			"content": fullResponse,
-			"status":  statusCode,
+			"content":       fullResponse,
+			"status":        statusCode,
+			"tokens_input":  tokensInput,
+			"tokens_output": tokensOutput,
+			"tokens_total":  tokensTotal,
+			"cost":          cost,
 		}
 		if err != nil {
 			responseData["error"] = err.Error()
 		}
-		
+
 		responseJSON, _ := json.Marshal(responseData)
-		h.Storage.SaveRequestLog(req.SessionID, string(requestJSON), string(responseJSON), statusCode, durationMs)
+
+		// Сохраняем логи с токенами и стоимостью
+		h.Storage.SaveRequestLog(
+			req.SessionID,
+			string(requestJSON),
+			string(responseJSON),
+			statusCode,
+			durationMs,
+			&tokensInput,
+			&tokensOutput,
+			&tokensTotal,
+			&cost,
+		)
 	}
 
 	logger.Info("v2 запрос обработан",
@@ -212,6 +239,10 @@ func (h *ChatHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"provider", p.Name(),
 		"duration_ms", durationMs,
 		"response_length", len(fullResponse),
+		"tokens_input", tokensInput,
+		"tokens_output", tokensOutput,
+		"tokens_total", tokensTotal,
+		"cost", cost,
 	)
 
 	fmt.Fprintf(w, "data: [DONE]\n\n")

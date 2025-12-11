@@ -6,7 +6,17 @@
     response_json: string;
     status_code: number;
     duration_ms: number;
+    tokens_input?: number;
+    tokens_output?: number;
+    tokens_total?: number;
+    cost?: number;
     created_at: string;
+  }
+
+  function formatCost(cost?: number): string {
+    if (cost === undefined || cost === null) return '-';
+    if (cost === 0) return 'Бесплатно';
+    return `$${cost.toFixed(6)}`;
   }
 
   interface Props {
@@ -128,6 +138,10 @@
             <th>Response</th>
             <th>Статус</th>
             <th>Время (мс)</th>
+            <th>Токены (вход)</th>
+            <th>Токены (выход)</th>
+            <th>Всего</th>
+            <th>Стоимость</th>
           </tr>
         </thead>
         <tbody>
@@ -138,6 +152,10 @@
               <td class="content">{truncate(log.response_json, 30)}</td>
               <td class="status" class:success={log.status_code === 200}>{log.status_code}</td>
               <td class="duration">{log.duration_ms}</td>
+              <td class="tokens">{log.tokens_input ?? '-'}</td>
+              <td class="tokens">{log.tokens_output ?? '-'}</td>
+              <td class="tokens">{log.tokens_total ?? '-'}</td>
+              <td class="cost">{formatCost(log.cost)}</td>
             </tr>
           {/each}
         </tbody>
@@ -170,6 +188,18 @@
           <span>Статус: {selectedLog.status_code}</span>
           <span>Время: {selectedLog.duration_ms} мс</span>
           <span>Сессия: {selectedLog.session_id}</span>
+          {#if selectedLog.tokens_input !== undefined}
+            <span>Токены (вход): {selectedLog.tokens_input}</span>
+          {/if}
+          {#if selectedLog.tokens_output !== undefined}
+            <span>Токены (выход): {selectedLog.tokens_output}</span>
+          {/if}
+          {#if selectedLog.tokens_total !== undefined}
+            <span>Всего токенов: {selectedLog.tokens_total}</span>
+          {/if}
+          {#if selectedLog.cost !== undefined}
+            <span>Стоимость: {formatCost(selectedLog.cost)}</span>
+          {/if}
         </div>
       </div>
     </div>
@@ -258,6 +288,20 @@
   .duration {
     text-align: right;
     font-family: monospace;
+  }
+
+  .tokens {
+    text-align: right;
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--muted-foreground);
+  }
+
+  .cost {
+    text-align: right;
+    font-family: monospace;
+    font-size: 12px;
+    color: var(--muted-foreground);
   }
 
   /* Modal */
