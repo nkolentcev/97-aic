@@ -22,11 +22,11 @@ type Config struct {
 	DefaultProvider string `yaml:"default_provider"` // gigachat, groq, ollama
 
 	// GigaChat API (legacy + новый формат)
-	GigaChatAccessToken string `yaml:"gigachat_access_token"`
-	GigaChatAuthKey     string `yaml:"gigachat_auth_key"`
-	GigaChatAPIURL      string `yaml:"gigachat_api_url"`
-	GigaChatAuthURL     string `yaml:"gigachat_auth_url"`
-	GigaChatSkipTLSVerify bool `yaml:"gigachat_skip_tls_verify"` // Для тестирования: пропускать проверку TLS сертификата
+	GigaChatAccessToken   string `yaml:"gigachat_access_token"`
+	GigaChatAuthKey       string `yaml:"gigachat_auth_key"`
+	GigaChatAPIURL        string `yaml:"gigachat_api_url"`
+	GigaChatAuthURL       string `yaml:"gigachat_auth_url"`
+	GigaChatSkipTLSVerify bool   `yaml:"gigachat_skip_tls_verify"` // Для тестирования: пропускать проверку TLS сертификата
 
 	// Провайдеры (новый формат)
 	Providers struct {
@@ -52,19 +52,33 @@ type Config struct {
 
 	// CORS
 	CORSAllowedOrigins []string `yaml:"cors_allowed_origins"`
+
+	// Компрессия истории (summary)
+	HistoryCompression struct {
+		Enabled          bool    `yaml:"enabled"`
+		EveryMessages    int     `yaml:"every_messages"`
+		KeepLastMessages int     `yaml:"keep_last_messages"`
+		MaxTokens        int     `yaml:"max_tokens"`
+		Temperature      float64 `yaml:"temperature"`
+	} `yaml:"history_compression"`
 }
 
 // Константы по умолчанию
 const (
-	DefaultPort               = "8080"
-	DefaultLogLevel           = "info"
-	DefaultLogFormat          = "text"
-	DefaultDatabasePath       = "data.db"
-	DefaultMaxRequestBodySize = 1 << 20 // 1 MB
-	DefaultMaxQueryLimit      = 1000
-	DefaultQueryLimit         = 100
-	DefaultGigaChatAPIURL     = "https://gigachat.devices.sberbank.ru/api/v1"
-	DefaultGigaChatAuthURL    = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+	DefaultPort                               = "8080"
+	DefaultLogLevel                           = "info"
+	DefaultLogFormat                          = "text"
+	DefaultDatabasePath                       = "data.db"
+	DefaultMaxRequestBodySize                 = 1 << 20 // 1 MB
+	DefaultMaxQueryLimit                      = 1000
+	DefaultQueryLimit                         = 100
+	DefaultGigaChatAPIURL                     = "https://gigachat.devices.sberbank.ru/api/v1"
+	DefaultGigaChatAuthURL                    = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
+	DefaultHistoryCompressionEnabled          = false
+	DefaultHistoryCompressionEveryMessages    = 10
+	DefaultHistoryCompressionKeepLastMessages = 4
+	DefaultHistoryCompressionMaxTokens        = 256
+	DefaultHistoryCompressionTemperature      = 0.2
 )
 
 // Load загружает конфигурацию из файла
@@ -119,6 +133,20 @@ func (c *Config) applyDefaults() {
 	}
 	if len(c.CORSAllowedOrigins) == 0 {
 		c.CORSAllowedOrigins = []string{"*"}
+	}
+
+	// History compression defaults
+	if c.HistoryCompression.EveryMessages <= 0 {
+		c.HistoryCompression.EveryMessages = DefaultHistoryCompressionEveryMessages
+	}
+	if c.HistoryCompression.KeepLastMessages < 0 {
+		c.HistoryCompression.KeepLastMessages = DefaultHistoryCompressionKeepLastMessages
+	}
+	if c.HistoryCompression.MaxTokens <= 0 {
+		c.HistoryCompression.MaxTokens = DefaultHistoryCompressionMaxTokens
+	}
+	if c.HistoryCompression.Temperature == 0 {
+		c.HistoryCompression.Temperature = DefaultHistoryCompressionTemperature
 	}
 }
 

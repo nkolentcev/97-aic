@@ -2,12 +2,15 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"time"
 
+	"github.com/nnk/97-aic/backend/config"
+	historycompress "github.com/nnk/97-aic/backend/history"
 	"github.com/nnk/97-aic/backend/logger"
 	"github.com/nnk/97-aic/backend/provider"
 	"github.com/nnk/97-aic/backend/storage"
@@ -17,13 +20,15 @@ import (
 type ChatHandlerV2 struct {
 	ProviderManager *provider.Manager
 	Storage         *storage.Storage
+	Config          *config.Config
 }
 
 // ChatRequestV2 запрос к API v2
 type ChatRequestV2 struct {
-	Message    string `json:"message"`
-	SessionID  string `json:"session_id,omitempty"`
-	UseHistory bool   `json:"use_history,omitempty"`
+	Message         string `json:"message"`
+	SessionID       string `json:"session_id,omitempty"`
+	UseHistory      bool   `json:"use_history,omitempty"`
+	CompressHistory *bool  `json:"compress_history,omitempty"`
 
 	// Провайдер и модель
 	Provider string `json:"provider,omitempty"` // gigachat, groq, ollama
@@ -45,10 +50,11 @@ type ChatRequestV2 struct {
 }
 
 // NewChatHandlerV2 создает новый обработчик
-func NewChatHandlerV2(pm *provider.Manager, store *storage.Storage) *ChatHandlerV2 {
+func NewChatHandlerV2(pm *provider.Manager, store *storage.Storage, cfg *config.Config) *ChatHandlerV2 {
 	return &ChatHandlerV2{
 		ProviderManager: pm,
 		Storage:         store,
+		Config:          cfg,
 	}
 }
 
@@ -112,12 +118,22 @@ func (h *ChatHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Загружаем историю
 	var history []provider.Message
+	var summaryText string
 	if req.UseHistory && h.Storage != nil {
-		messages, err := h.Storage.GetMessages(req.SessionID, 100)
+		if summaryMsg, err := h.Storage.GetLatestSummary(req.SessionID); err != nil {
+			logger.Warn("ошибка загрузки summary", "error", err)
+		} else if summaryMsg != nil {
+			summaryText = summaryMsg.Content
+		}
+
+		messages, err := h.Storage.GetMessages(req.SessionID, 1000)
 		if err != nil {
 			logger.Warn("ошибка загрузки истории", "error", err)
 		} else {
 			for _, msg := range messages {
+				if msg.Role == storage.RoleSummary {
+					continue
+				}
 				history = append(history, provider.Message{
 					Role:    msg.Role,
 					Content: msg.Content,
@@ -145,8 +161,16 @@ func (h *ChatHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var fullResponse string
 
 	// Подготавливаем опции
+	systemPrompt := req.SystemPrompt
+	if summaryText != "" {
+		if systemPrompt != "" {
+			systemPrompt += "\n\n"
+		}
+		systemPrompt += "КРАТКОЕ РЕЗЮМЕ ПРЕДЫДУЩЕГО ДИАЛОГА (используй как контекст):\n" + summaryText
+	}
+
 	opts := &provider.ChatOptions{
-		SystemPrompt:   req.SystemPrompt,
+		SystemPrompt:   systemPrompt,
 		History:        history,
 		MaxTokens:      req.MaxTokens,
 		Temperature:    req.Temperature,
@@ -156,7 +180,7 @@ func (h *ChatHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Подсчитываем токены запроса перед отправкой
-	tokensInput := provider.CountTokensForMessages(req.SystemPrompt, history, req.Message)
+	tokensInput := provider.CountTokensForMessages(systemPrompt, history, req.Message)
 
 	// Отправляем запрос
 	err = p.Chat(ctx, req.Message, opts, func(chunk string) error {
@@ -201,8 +225,9 @@ func (h *ChatHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"provider":       p.Name(),
 			"model":          p.GetModel(),
 			"reasoning_mode": req.ReasoningMode,
-			"system_prompt":  req.SystemPrompt,
+			"system_prompt":  systemPrompt,
 			"tokens_input":   tokensInput,
+			"used_summary":   summaryText != "",
 		})
 
 		// Формируем response JSON с учетом ошибок
@@ -247,6 +272,28 @@ func (h *ChatHandlerV2) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	fmt.Fprintf(w, "data: [DONE]\n\n")
 	flusher.Flush()
+
+	// Компрессия истории (асинхронно, чтобы не задерживать ответ)
+	compressEnabled := h.Config != nil && h.Config.HistoryCompression.Enabled
+	if req.CompressHistory != nil {
+		compressEnabled = *req.CompressHistory
+	}
+	if compressEnabled && h.Storage != nil {
+		compCfg := historycompress.Config{Enabled: true}
+		if h.Config != nil {
+			compCfg.EveryMessages = h.Config.HistoryCompression.EveryMessages
+			compCfg.KeepLastMessages = h.Config.HistoryCompression.KeepLastMessages
+			compCfg.MaxTokens = h.Config.HistoryCompression.MaxTokens
+			compCfg.Temperature = h.Config.HistoryCompression.Temperature
+		}
+		go func(sessionID string) {
+			cctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+			defer cancel()
+			if _, err := historycompress.CompressSessionIfNeeded(cctx, p, h.Storage, sessionID, compCfg); err != nil {
+				logger.Warn("ошибка компрессии истории", "session_id", sessionID, "error", err)
+			}
+		}(req.SessionID)
+	}
 }
 
 // ProvidersHandler возвращает список доступных провайдеров

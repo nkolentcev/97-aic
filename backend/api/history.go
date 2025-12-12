@@ -33,6 +33,7 @@ func (h *HistoryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	sessionID := r.URL.Query().Get("session_id")
 	limitStr := r.URL.Query().Get("limit")
+	includeSummary := r.URL.Query().Get("include_summary")
 
 	limit := h.Config.DefaultQueryLimit
 	if limitStr != "" {
@@ -51,6 +52,18 @@ func (h *HistoryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		logger.Error("ошибка получения истории", "error", err, "session_id", sessionID)
 		http.Error(w, "Ошибка получения истории", http.StatusInternalServerError)
 		return
+	}
+
+	// По умолчанию summary скрываем (чтобы не ломать UI/контракты ролей).
+	if includeSummary == "" || includeSummary == "0" || includeSummary == "false" {
+		filtered := make([]storage.Message, 0, len(messages))
+		for _, m := range messages {
+			if m.Role == storage.RoleSummary {
+				continue
+			}
+			filtered = append(filtered, m)
+		}
+		messages = filtered
 	}
 
 	w.Header().Set("Content-Type", "application/json")

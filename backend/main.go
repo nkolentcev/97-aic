@@ -120,7 +120,7 @@ func main() {
 		chatHandler = api.NewChatHandler(gigachatClient, store)
 		collectHandler = api.NewCollectHandler(gigachatClient, store)
 	}
-	chatHandlerV2 := api.NewChatHandlerV2(providerManager, store)
+	chatHandlerV2 := api.NewChatHandlerV2(providerManager, store, cfg)
 	providersHandler := api.NewProvidersHandler(providerManager)
 	modelsCompareHandler := api.NewModelsCompareHandler(providerManager)
 	tokenTestHandler := api.NewTokenTestHandler(providerManager)
